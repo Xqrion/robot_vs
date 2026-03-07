@@ -1,9 +1,11 @@
 <launch>
   <arg
     name="model" />
+  <arg
+    name="robot_namespace" />
   <param
     name="robot_description"
-    textfile="$(find robot_vs)/mowen_param/mowen.urdf" />
+    textfile="$(find robot_vs)/config/mowen_param/mowen.urdf" />
   <!--
   <node
     name="joint_state_publisher_gui"
