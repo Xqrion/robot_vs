@@ -15,7 +15,7 @@
     <param name="pubPointCloud2" value="false"/>                                      #雷达是否发布pointcloud2话题
     <param name="high_reflection" value="false"/>                                     #M10_P雷达需填写该值,若不确定，请联系技术支持。
     <!--param name="in_file_name" value="$(find lslidar_driver)/pcap/xxx.txt"/-->       #驱动是否使用txt文件读取功能
-  
+    </node>
 
     <!-- 镭神雷达参数 -->
     <!-- <param name="lslidar_driver_node/truncated_mode" value="0"/> -->    <!--0:不屏蔽角度 1:屏蔽角度-->
@@ -26,7 +26,7 @@
     <rosparam param="lslidar_driver_node/disable_min">[90]</rosparam> <!--角度左值-->
     <rosparam param="lslidar_driver_node/disable_max">[270]</rosparam> <!--角度右值-->
     <!--?-->
-    </node>
+    <!-- </node> -->
     
     <!-- <group ns="$(arg robot_namespace)"> -->
       <!-- <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser4"

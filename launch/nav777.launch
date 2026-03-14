@@ -1,8 +1,7 @@
 <!-- 集成导航相关的 launch 文件 -->
 <launch>
-    <!--node pkg="carbringup" type="newt.py" name="cmd_vel_listener"/-->
+    <node pkg="car_bringup" type="newt.py" name="cmd_vel_listener"/>
     <!-- 地图服务 -->
-    <group ns="robot_blue">
     <include file="$(find nav_demo)/launch/nav03_map_server.launch" />
 
     <!-- 加载雷达 -->
@@ -37,7 +36,6 @@
 
     <!-- 运行move_base节点 -->
     <include file="$(find nav_demo)/launch/nav05_path_dwa.launch" />
-    </group>
 
     <!-- 运行rviz -->
     <node pkg="rviz" type="rviz" name="rviz" args="-d $(find nav_demo)/config/single_nav.rviz" />
