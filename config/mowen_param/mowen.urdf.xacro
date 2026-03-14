@@ -28,6 +28,7 @@
             <xacro:insert_block name="origin"/>
         </link>
     </xacro:macro>
+
     <xacro:macro name="continuous_joint" params="name parent child xyz rpy axis">
         <joint name="${ns}/${name}" type="continuous">
             <parent link="${ns}/${parent}"/>
@@ -37,6 +38,7 @@
             <limit lower="${-pi}" upper="${pi}" effort="100" velocity="1"/>
         </joint>
     </xacro:macro>
+
     <xacro:macro name="fixed_joint" params="name parent child xyz rpy">
         <joint name="${ns}/${name}" type="fixed">
             <parent link="${ns}/${parent}"/>
@@ -44,6 +46,7 @@
             <origin xyz="${xyz}" rpy="${rpy}"/>
         </joint>
     </xacro:macro>
+
     <common_link name="base_link" material="Green" path="mecanum">
         <inertial>
             <origin xyz="0.00498197982182523 5.70233829969297E-05 -0.0121008098068578" rpy="0 0 0"/>
@@ -58,4 +61,17 @@
         </inertial>
     </common_link>
     <fixed_joint name="base_joint" parent="base_footprint" child="base_link" xyz="0.0 0.0 0.0815" rpy="0 0 0"/>
+
+    <!-- ======================================== -->
+    <!-- 新增：激光雷达laser_link和固定关节 -->
+    <!-- ======================================== -->
+    <!-- 3. 激光雷达link（用common_link宏，material和path根据你的实际情况改，没有STL的话可以留空或简化） -->
+    <common_link name="laser_link" material="White" path="mecanum">
+        <!-- 如果没有激光雷达的STL文件，可以把visual和collision标签简化成简单的几何体，比如圆柱 -->
+        <!-- 这里先保留你的common_link结构，没有STL的话RViz里不会显示激光雷达模型，但不影响TF和导航 -->
+    </common_link>
+
+    <!-- 4. 固定关节：连接base_link和laser_link -->
+    <!-- 参数和你launch里的static_transform_publisher完全一致：x=0.1, y=0.0, z=0.05, rpy=3.14159265 0.0 0.0 -->
+    <fixed_joint name="base_laser_joint" parent="base_link" child="laser_link" xyz="0.1 0.0 0.05" rpy="3.14159265 0.0 0.0"/>
 </robot>
