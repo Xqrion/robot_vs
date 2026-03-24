@@ -85,12 +85,12 @@ class LLMClient(object):
                 tasks[robot_id] = self._stop_task("missing/stale robot state")
                 continue
 
-            point = self._patrol_points[idx % len(self._patrol_points)]
+            point = self._normalize_patrol_point(self._patrol_points[idx % len(self._patrol_points)])
             tasks[robot_id] = {
                 "action": "GOTO",
                 "target": {
-                    "x": float(point.get("x", 0.0)),
-                    "y": float(point.get("y", 0.0)),
+                    "x": float(point["x"]),
+                    "y": float(point["y"]),
                 },
                 "mode": 1,
                 "reason": "patrol (no visible enemy)",
@@ -99,7 +99,8 @@ class LLMClient(object):
         return tasks
 
     def _extract_friendly_robots(self, battle_state):
-        friendly = battle_state.get("friendly", {})
+        context = self._extract_context(battle_state)
+        friendly = context.get("friendly", {})
         if isinstance(friendly, dict) and friendly:
             return sorted(friendly.keys()), friendly
 
@@ -114,7 +115,8 @@ class LLMClient(object):
         return [], {}
 
     def _extract_visible_enemies(self, battle_state):
-        enemy_block = battle_state.get("enemy", {})
+        context = self._extract_context(battle_state)
+        enemy_block = context.get("enemy", {})
         if not isinstance(enemy_block, dict):
             return []
 
@@ -145,6 +147,24 @@ class LLMClient(object):
 
         return []
 
+    def _extract_context(self, planner_input):
+        # A) planner_input has top-level friendly/enemy
+        if isinstance(planner_input.get("friendly"), dict) or isinstance(planner_input.get("enemy"), dict):
+            return {
+                "friendly": planner_input.get("friendly", {}),
+                "enemy": planner_input.get("enemy", {}),
+            }
+
+        # B) planner_input has battle_state with friendly/enemy inside
+        nested = planner_input.get("battle_state", {})
+        if isinstance(nested, dict):
+            return {
+                "friendly": nested.get("friendly", {}),
+                "enemy": nested.get("enemy", {}),
+            }
+
+        return {"friendly": {}, "enemy": {}}
+
     def _is_robot_data_missing(self, state_entry):
         if not isinstance(state_entry, dict):
             return True
@@ -161,6 +181,21 @@ class LLMClient(object):
             "mode": 0,
             "reason": reason,
         }
+
+    def _normalize_patrol_point(self, point):
+        if isinstance(point, dict):
+            return {
+                "x": float(point.get("x", 0.0)),
+                "y": float(point.get("y", 0.0)),
+            }
+
+        if isinstance(point, (list, tuple)) and len(point) >= 2:
+            return {
+                "x": float(point[0]),
+                "y": float(point[1]),
+            }
+
+        return {"x": 0.0, "y": 0.0}
 
     def _call_remote_llm(self, prompt):
         """Reserved: call real remote LLM API and return raw text."""

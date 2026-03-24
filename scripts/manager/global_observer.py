@@ -19,6 +19,8 @@ class GlobalObserver(object):
 
 	def __init__(self, my_cars, state_timeout=2.0,
 				 enemy_topic="/referee/enemy_state", enemy_timeout=None):
+		if my_cars is None or not isinstance(my_cars, list):
+			my_cars = []
 		self.my_cars = list(my_cars)
 		self.state_timeout = float(state_timeout)
 		self.enemy_timeout = float(enemy_timeout) if enemy_timeout is not None else float(state_timeout)

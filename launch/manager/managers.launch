@@ -1,0 +1,19 @@
+<launch>
+  <!-- Red Manager -->
+  <node pkg="robot_vs"
+        type="manager_node.py"
+        name="red_manager"
+        output="screen"
+        required="false">
+    <rosparam command="load" file="$(find robot_vs)/config/manager/red_manager.yaml" />
+  </node>
+
+  <!-- Blue Manager -->
+  <node pkg="robot_vs"
+        type="manager_node.py"
+        name="blue_manager"
+        output="screen"
+        required="false">
+    <rosparam command="load" file="$(find robot_vs)/config/manager/blue_manager.yaml" />
+  </node>
+</launch>

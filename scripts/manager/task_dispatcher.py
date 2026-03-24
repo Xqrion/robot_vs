@@ -11,6 +11,8 @@ class TaskDispatcher(object):
 	def __init__(self, my_cars=None, default_timeout=2.0):
 		if my_cars is None:
 			my_cars = rospy.get_param("~my_cars", [])
+		if not isinstance(my_cars, list):
+			my_cars = []
 
 		self.my_cars = list(my_cars)
 		self.default_timeout = float(default_timeout)
@@ -108,11 +110,13 @@ class TaskDispatcher(object):
 				pub.publish(msg)
 
 				rospy.loginfo(
-					"dispatch ns=%s action=%s target=(%.2f, %.2f)",
+					"dispatch ns=%s task_id=%d action=%s target=(%.2f, %.2f) reason=%s",
 					ns,
+					msg.task_id,
 					msg.action_type,
 					msg.target_x,
 					msg.target_y,
+					msg.reason,
 				)
 			except Exception as exc:
 				rospy.logwarn("dispatch failed for %s: %s", ns, exc)
