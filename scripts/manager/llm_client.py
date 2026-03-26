@@ -31,10 +31,13 @@ class LLMClient(object):
     def plan_tasks(self, battle_state):
         """Plan tasks from battle state using deterministic rules.
 
-        Rules:
-        1) Visible enemy: split robots by index, even->contain, odd->flank.
-        2) No enemy: patrol preset points.
-        3) Missing data: STOP with reason.
+        Rules (test-friendly):
+        1) stale/missing robot state -> STOP
+        2) dead robot -> STOP
+        3) failed task -> retry patrol point
+        4) visible enemy + enough ammo -> ATTACK/GOTO
+        5) low hp or low ammo -> RETREAT (GOTO safe point, mode=3)
+        6) otherwise -> patrol
         """
         if self._planner_fn is not None:
             return self._planner_fn(battle_state)
@@ -46,57 +49,97 @@ class LLMClient(object):
         if not robot_ids:
             return {}
 
-        tasks = {}
         visible_enemies = self._extract_visible_enemies(battle_state)
-
-        if visible_enemies:
-            primary_enemy = visible_enemies[0]
-            enemy_x = float(primary_enemy.get("x", 0.0))
-            enemy_y = float(primary_enemy.get("y", 0.0))
-
-            for idx, robot_id in enumerate(robot_ids):
-                state_entry = friendly.get(robot_id, {})
-                if self._is_robot_data_missing(state_entry):
-                    tasks[robot_id] = self._stop_task("missing/stale robot state in visible enemy")
-                    continue
-
-                if idx % 2 == 0:
-                    tasks[robot_id] = {
-                        "action": "GOTO",
-                        "target": {"x": enemy_x, "y": enemy_y},
-                        "mode": 2,
-                        "reason": "contain visible enemy",
-                    }
-                else:
-                    flank_y = enemy_y + self._flank_offset if ((idx // 2) % 2 == 0) else enemy_y - self._flank_offset
-                    tasks[robot_id] = {
-                        "action": "GOTO",
-                        "target": {"x": enemy_x + self._flank_offset, "y": flank_y},
-                        "mode": 2,
-                        "reason": "flank visible enemy",
-                    }
-
-            return tasks
-
-        # No visible enemy -> patrol
+        tasks = {}
         for idx, robot_id in enumerate(robot_ids):
             state_entry = friendly.get(robot_id, {})
-            if self._is_robot_data_missing(state_entry):
-                tasks[robot_id] = self._stop_task("missing/stale robot state in no visible enemy")
-                continue
-
-            point = self._normalize_patrol_point(self._patrol_points[idx % len(self._patrol_points)])
-            tasks[robot_id] = {
-                "action": "GOTO",
-                "target": {
-                    "x": float(point["x"]),
-                    "y": float(point["y"]),
-                },
-                "mode": 1,
-                "reason": "patrol (no visible enemy)",
-            }
+            tasks[robot_id] = self._plan_single_robot_task(state_entry, idx, visible_enemies)
 
         return tasks
+
+    def _plan_single_robot_task(self, state_entry, robot_index, visible_enemies):
+        if self._is_robot_data_missing(state_entry):
+            return self._stop_task("missing/stale robot state", timeout=1.5)
+
+        state = state_entry.get("state")
+        alive = bool(self._read_value(state, "alive", True))
+        hp = self._to_float(self._read_value(state, "hp", 100.0), 100.0)
+        ammo = self._to_float(self._read_value(state, "ammo", 0.0), 0.0)
+        in_combat = bool(self._read_value(state, "in_combat", False))
+        task_status = str(self._read_value(state, "task_status", "")).upper()
+        current_action = str(self._read_value(state, "current_action", "")).upper()
+
+        if (not alive) or hp <= 0.0:
+            return self._stop_task("robot not alive", timeout=5.0)
+
+        if task_status in ("FAILED", "ABORTED", "TIMEOUT"):
+            retry_point = self._get_patrol_point(robot_index)
+            return self._build_task(
+                action="GOTO",
+                target=retry_point,
+                mode=1,
+                reason="retry after task failure",
+                timeout=4.0,
+            )
+
+        # Low resources first: keep robot safe.
+        if hp < 20.0 or ammo <= 0.0:
+            return self._build_task(
+                action="GOTO",
+                target=self._get_safe_point(robot_index),
+                mode=3,
+                reason="retreat (low hp/ammo)",
+                timeout=6.0,
+            )
+
+        if visible_enemies:
+            enemy = visible_enemies[robot_index % len(visible_enemies)]
+            enemy_x = self._to_float(enemy.get("x", 0.0), 0.0)
+            enemy_y = self._to_float(enemy.get("y", 0.0), 0.0)
+
+            if in_combat or current_action == "ATTACK":
+                return self._build_task(
+                    action="ATTACK",
+                    target={"x": enemy_x, "y": enemy_y},
+                    mode=2,
+                    reason="engage visible enemy",
+                    timeout=2.0,
+                )
+
+            if robot_index % 2 == 0:
+                return self._build_task(
+                    action="GOTO",
+                    target={"x": enemy_x, "y": enemy_y},
+                    mode=2,
+                    reason="contain visible enemy",
+                    timeout=4.0,
+                )
+
+            flank_y = enemy_y + self._flank_offset if ((robot_index // 2) % 2 == 0) else enemy_y - self._flank_offset
+            return self._build_task(
+                action="GOTO",
+                target={"x": enemy_x + self._flank_offset, "y": flank_y},
+                mode=2,
+                reason="flank visible enemy",
+                timeout=4.0,
+            )
+
+        if ammo <= 5.0:
+            return self._build_task(
+                action="GOTO",
+                target=self._get_safe_point(robot_index),
+                mode=3,
+                reason="retreat (low ammo)",
+                timeout=5.0,
+            )
+
+        return self._build_task(
+            action="GOTO",
+            target=self._get_patrol_point(robot_index),
+            mode=1,
+            reason="patrol (no visible enemy)",
+            timeout=8.0,
+        )
 
     def _extract_friendly_robots(self, battle_state):
         context = self._extract_context(battle_state)
@@ -174,13 +217,55 @@ class LLMClient(object):
             return True
         return False
 
-    def _stop_task(self, reason):
+    def _build_task(self, action, target, mode, reason, timeout):
+        target_point = self._normalize_patrol_point(target)
         return {
-            "action": "STOP",
-            "target": {"x": 0.0, "y": 0.0},
-            "mode": 0,
-            "reason": reason,
+            "action": str(action),
+            "target": {
+                "x": float(target_point["x"]),
+                "y": float(target_point["y"]),
+            },
+            "mode": int(mode),
+            "reason": str(reason),
+            "timeout": float(timeout),
         }
+
+    def _stop_task(self, reason, timeout=2.0):
+        return self._build_task(
+            action="STOP",
+            target={"x": 0.0, "y": 0.0},
+            mode=0,
+            reason=reason,
+            timeout=timeout,
+        )
+
+    def _get_patrol_point(self, robot_index):
+        if not self._patrol_points:
+            return {"x": 0.0, "y": 0.0}
+        return self._normalize_patrol_point(self._patrol_points[robot_index % len(self._patrol_points)])
+
+    def _get_safe_point(self, robot_index):
+        patrol = self._get_patrol_point(robot_index)
+        return {
+            "x": patrol["x"] - self._flank_offset,
+            "y": patrol["y"] - self._flank_offset,
+        }
+
+    def _read_value(self, obj, key, default=None):
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        try:
+            return getattr(obj, key)
+        except Exception:
+            return default
+
+    def _to_float(self, value, default):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
 
     def _normalize_patrol_point(self, point):
         if isinstance(point, dict):

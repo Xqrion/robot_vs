@@ -1,11 +1,10 @@
-uint32 task_id
+# 1. 任务元数据
+uint32 task_id              # 任务流水号，递增
+string action_type          # 动作类型：GOTO, STOP, ATTACK
+string reason               # 大模型给出的战术意图（仅打印日志用）
 
-# action (运动指令)：GOTO（去哪）、STOP（停下）。它完全是给底盘和导航栈看的。
-string action_type
-float32 target_x
-float32 target_y
-
-# mode (战术姿态)：比如 0=待机, 1=巡逻, 2=攻击。它是给云台、发射器、UI灯效看的。
-uint8 mode
-string reason
-float32 timeout
+# 2. 动作参数
+float32 target_x            # 目标 X 坐标 (GOTO的终点，或 ATTACK 的瞄准点)
+float32 target_y            # 目标 Y 坐标
+uint8 mode                  # 期望的模式 (0待机, 1巡逻, 2攻击)
+float32 timeout             # 任务超时时间 (秒)，超时没完成就自动取消

@@ -1,0 +1,22 @@
+rostopic pub -r 5 /robot_red/robot_state robot_vs/RobotState "
+robot_ns: 'robot_red'
+team: 0
+hp: 100.0
+ammo: 50.0
+alive: true
+in_combat: false
+pose:
+  position: {x: 0.0, y: 0.0, z: 0.0}
+  orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+twist:
+  linear: {x: 0.0, y: 0.0, z: 0.0}
+  angular: {x: 0.0, y: 0.0, z: 0.0}
+current_action: 'IDLE'
+task_status: 'RUNNING'
+mode: 1
+"
+
+
+
+
+
