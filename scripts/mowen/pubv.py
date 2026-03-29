@@ -65,7 +65,7 @@ if __name__ == '__main__':
                         print("z",z/1000)
                     twist.linear.x = (x/1000)
                     twist.linear.y =(y/1000)
-                    twist.angular.z = (z/1000)*0.75
+                    twist.angular.z = (z/1000) #*0.75
                     print(twist)
                     velPublisher.publish(twist)
                     break
