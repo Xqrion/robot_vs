@@ -9,7 +9,7 @@
       <!-- 加载机器人模型-->
   <include file="$(find mowen)/launch/display.launch" />
   <include  file="$(find wit_ros_imu)/launch/wit_imu.launch" />
-   <node pkg="car_bringup" name="pubv" type="pubv.py"  />
+   <node pkg="robot_vs" name="pubv" type="pubv.py"  />
     <node pkg="car_bringup" type="base_node" name="odometry_publisher">
         <param name="odom_frame" type="string" value="odom"/>
         <param name="base_footprint_frame" type="string" value="base_footprint"/>
