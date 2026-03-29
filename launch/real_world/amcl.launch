@@ -1,7 +1,7 @@
 <launch>
   <arg name="use_map_topic" default="false"/>
   <arg name="robot_namespace" default=""/>
-  <arg name="global_frame_id" default="map"/>
+  <arg name="global_frame_id" default="/map"/><!--map -> /map -->
   <arg name="scan_topic" value="scan"/>
   <arg name="odom_frame_id"   value="$(arg robot_namespace)/odom"/> <!-- 动态生成 -->
   <arg name="base_frame_id"   value="$(arg robot_namespace)/base_link"/> <!-- footprint -> link -->
@@ -15,7 +15,7 @@
       <!-- 核心参数 -->
       <param name="use_map_topic" value="$(arg use_map_topic)"/>
       <param name="odom_model_type" value="omni"/> <!-- diffenence -->
-      <param name="odom_alpha5" value="0.2"/> <!-- diff -->
+      <param name="odom_alpha5" value="0.1"/> <!-- diff -->
       <param name="gui_publish_rate" value="50.0"/>
       <param name="laser_max_beams" value="180"/>
       <param name="laser_max_range" value="14.0"/>
