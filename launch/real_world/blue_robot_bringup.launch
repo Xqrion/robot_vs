@@ -3,9 +3,9 @@
   <arg name="robot_namespace" default="robot_blue" doc="蓝车命名空间"/>
   <arg name="urdf_path" default="$(find robot_vs)/config/mowen_param/mowen.urdf.xacro" doc="蓝车的URDF模型"/>
   <arg name="type" default="normal" doc="type [normal, modbus, hmodbus, can, hcan]"/>
-  <arg name="initial_pose_x" default="5.0" doc="【必须适配】蓝车在场地里的实际初始X坐标"/>
+  <arg name="initial_pose_x" default="0.0" doc="【必须适配】蓝车在场地里的实际初始X坐标"/>
   <arg name="initial_pose_y" default="0.0" doc="【必须适配】蓝车在场地里的实际初始Y坐标"/>
-  <arg name="initial_pose_a" default="3.14" doc="【必须适配】蓝车在场地里的实际初始朝向（弧度）"/>
+  <arg name="initial_pose_a" default="0.0" doc="【必须适配】蓝车在场地里的实际初始朝向（弧度）"/>
 
   <group ns="$(arg robot_namespace)">
     <!--底盘-->
