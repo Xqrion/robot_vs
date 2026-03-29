@@ -1,7 +1,7 @@
 <launch>
   <arg name="use_map_topic" default="false"/>
   <arg name="robot_namespace" default=""/>
-  <arg name="global_frame_id" default="/map"/><!--map -> /map -->
+  <arg name="global_frame_id" default="map"/><!--map -> /map -->
   <arg name="scan_topic" value="scan"/>
   <arg name="odom_frame_id"   value="$(arg robot_namespace)/odom"/> <!-- 动态生成 -->
   <arg name="base_frame_id"   value="$(arg robot_namespace)/base_link"/> <!-- footprint -> link -->
