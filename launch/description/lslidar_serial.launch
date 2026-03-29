@@ -28,8 +28,7 @@
     <!--?-->
     <!-- </node> -->
     
-    <!-- <group ns="$(arg robot_namespace)"> -->
-      <!-- <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser4"
-    args="0.1 0.0 0.05 3.14159265 0.0 0.0 $(arg robot_namespace)/base_link $(arg robot_namespace)/laser_link 100" /> -->
-    <!-- </group> -->
+    
+      <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser4"
+    args="0.1 0.0 0.05 3.14159265 0.0 0.0 $(arg robot_namespace)/base_link $(arg robot_namespace)/laser_link 100" />
 </launch>
