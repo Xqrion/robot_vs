@@ -1,26 +1,15 @@
 # robot_vs
 
-本仓库用于多机器人对抗场景（红蓝对抗）的仿真与现实部署实验。系统中包含多个小车（机器人）agent，在红方和蓝方阵营下分别由各自的 **manager 节点** 进行统筹与决策，小车本体只负责执行基础动作和指令解析。
+本仓库实现了多机器人红蓝对抗系统，采用 **Manager + Car Agent + Skill** 三层架构：
+- **Manager 层**（`scripts/manager/`）：感知全局战场状态，调用 LLM 规划战术，通过 `TaskCommand` 消息向各小车下发任务。
+- **Car Agent 层**（`scripts/car/`）：每辆小车运行一个独立的 `car_node.py`，接收任务并通过技能（Skill）执行动作，同时将 `RobotState` 反馈给 Manager。
+- **Skill 系统**（`scripts/car/skills/`）：GoToSkill（导航）、StopSkill（刹车）、AttackSkill（攻击），实现任务的原子化执行。
+
+详细架构说明与数据流图请参阅 → **[技术原理文档](TECHNICAL.md)**
 
 ---
 
 ## 演示 / Demo
-
-<!-- 
-  TODO：在此处插入项目演示内容，建议以下两种方式之一：
-
-  方式一：插入 GIF 动图
-  将 GIF 文件放入仓库（建议新建 docs/media/ 目录），然后替换下方路径：
-  ![仿真演示](docs/media/demo.gif)
-
-  方式二：插入视频封面图并链接视频
-  将封面截图放入仓库，视频上传至 B站 / YouTube 等平台后替换链接：
-  [![演示视频](docs/media/cover.png)](https://your-video-link-here)
-
-  建议展示内容：
-  - 多车在 Gazebo 中同时运动、对抗的过程
-  - Rviz 界面中各小车的轨迹与状态
--->
 
 > 🎬 演示图/视频即将更新，敬请期待……
 
@@ -30,9 +19,11 @@
 
 - 支持 **仿真环境** 与 **现实环境** 下的多机器人独立运行
 - 采用 **红方 / 蓝方 两个阵营** 的对抗结构
-  - 每个阵营有一个 manager 负责决策、感知与任务分配
-  - 每辆小车负责运动控制接口及指令解析与执行
+  - 每个阵营有一个 Manager 节点负责 LLM 决策与任务分配
+  - 每辆小车运行一个 Car Agent，通过技能系统执行 GOTO / STOP / ATTACK 三类动作
+  - 小车携带 `mode` 字段区分待机 / 巡逻 / 攻击模式
 - 基于 **命名空间 + TF 前缀** 实现多机话题隔离，防止冲突
+- `TaskCommand` / `RobotState` 消息形成完整的任务下发与状态反馈闭环
 - 仿真与现实话题结构保持一致，便于算法迁移
 - 提供编辑好的 Rviz 可视化界面
 
@@ -43,13 +34,22 @@
 详细的环境搭建与部署步骤请参考 → **[环境配置文档](INSTALL.md)**
 
 ```bash
-# 克隆项目到 ROS 工作空间
+# 1. 克隆项目到 ROS 工作空间
 cd ~/catkin_ws/src
 git clone https://github.com/Xqrion/robot_vs.git
 
-# 编译
+# 2. 编译
 cd ~/catkin_ws && catkin_make && source devel/setup.bash
+
+# 3. 启动 Manager（默认只启动红方；如需蓝方，取消注释 launch/manager/managers.launch 中对应节点）
+roslaunch robot_vs managers.launch
+
+# 4. 启动 Car Agent（红蓝各一辆；按需取消注释 launch/car/cars.launch 中多车配置）
+roslaunch robot_vs cars.launch
 ```
+
+> 两个 launch 文件均会自动加载对应的 YAML 配置文件，无需手动传参。  
+> 如需修改巡逻点、队伍颜色等参数，请直接编辑 `config/` 目录下对应的 YAML 文件。
 
 ---
 
@@ -58,7 +58,7 @@ cd ~/catkin_ws && catkin_make && source devel/setup.bash
 | 文档 | 内容 |
 |------|------|
 | [环境配置](INSTALL.md) | 虚拟机搭建、ROS 安装、项目部署全流程 |
-| [技术原理](TECHNICAL.md) | 命名空间隔离、TF 管理、系统架构设计 |
+| [技术原理](TECHNICAL.md) | 系统架构、Manager/Car/Skill 详解、ROS 消息流、数据流图 |
 
 ---
 
@@ -67,5 +67,7 @@ cd ~/catkin_ws && catkin_make && source devel/setup.bash
 | 模块 | 状态 |
 |------|------|
 | 仿真环境（Gazebo + Rviz） | ✅ 已完成 |
-| 红蓝阵营 manager 框架 | ✅ 已完成 |
+| 红蓝阵营 Manager 框架 | ✅ 已完成 |
+| Car Agent + Skill 系统 | ✅ 已完成 |
+| 裁判系统对接 | 🚧 进行中 |
 | 现实环境部署 | 🚧 进行中 |
