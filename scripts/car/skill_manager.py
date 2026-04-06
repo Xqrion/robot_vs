@@ -9,6 +9,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from move_base_msgs.msg import MoveBaseActionResult
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from robot_vs.msg import FireEvent
 from robot_vs.msg import RobotState
 
 from skills.base_skill import RUNNING, FAILED
@@ -62,6 +63,11 @@ class SkillManager(object):
             RobotState,
             queue_size=10,
         )
+        self._fire_event_pub = rospy.Publisher(
+            "/{}/fire_event".format(self.ns),
+            FireEvent,
+            queue_size=10,
+        )
 
         self._odom_sub = rospy.Subscriber(
             "/{}/odom".format(self.ns),
@@ -100,6 +106,14 @@ class SkillManager(object):
 
     def publish_cmd_vel(self, cmd_vel):
         self._cmd_vel_pub.publish(cmd_vel)
+
+    def publish_fire_event(self, x, y, yaw):
+        msg = FireEvent()
+        msg.shooter_ns = self.ns
+        msg.x = float(x)
+        msg.y = float(y)
+        msg.yaw = float(yaw)
+        self._fire_event_pub.publish(msg)
 
     # ------------------------------------------------------------------
     # 导航状态

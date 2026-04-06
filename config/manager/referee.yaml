@@ -1,0 +1,9 @@
+loop_hz: 10.0
+discover_hz: 1.0
+
+default_hp: 100
+default_ammo: 50.0
+fire_range: 5.0
+hit_width: 0.5
+fire_damage: 20
+vision_range: 4.0

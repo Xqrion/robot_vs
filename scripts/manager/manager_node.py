@@ -23,6 +23,7 @@ class TeamManager(object):
 
 	def __init__(self, team_color="red", my_cars=None, loop_hz=0.2,
 				 state_timeout_s=2.0, default_patrol_points=None,
+				 enemy_topic="/referee/enemy_state",
 				 observer=None, formatter=None, llm_client=None, dispatcher=None):
 		if my_cars is None:
 			my_cars = []
@@ -31,10 +32,12 @@ class TeamManager(object):
 		self.loop_hz = float(loop_hz)
 		self.state_timeout_s = float(state_timeout_s)
 		self.default_patrol_points = list(default_patrol_points) if default_patrol_points else []
+		self.enemy_topic = str(enemy_topic)
 
 		self.observer = observer if observer is not None else GlobalObserver(
 			my_cars=self.my_cars,
 			state_timeout=self.state_timeout_s,
+			enemy_topic=self.enemy_topic,
 		)
 		self.formatter = formatter if formatter is not None else BattleStateFormatter()
 		self.llm_client = llm_client if llm_client is not None else LLMClient(
@@ -45,11 +48,12 @@ class TeamManager(object):
 		)
 
 		rospy.loginfo(
-			"TeamManager initialized: team_color=%s my_cars=%s loop_hz=%.3f state_timeout_s=%.2f patrol_points=%s",
+			"TeamManager initialized: team_color=%s my_cars=%s loop_hz=%.3f state_timeout_s=%.2f enemy_topic=%s patrol_points=%s",
 			self.team_color,
 			self.my_cars,
 			self.loop_hz,
 			self.state_timeout_s,
+			self.enemy_topic,
 			self.default_patrol_points,
 		)
 
@@ -60,18 +64,22 @@ class TeamManager(object):
 		loop_hz = rospy.get_param("~loop_hz", 0.2)
 		state_timeout_s = rospy.get_param("~state_timeout_s", 2.0)
 		default_patrol_points = rospy.get_param("~default_patrol_points", [])
+		node_name = rospy.get_name().strip("/")
+		default_enemy_topic = "/{}/enemy_state".format(node_name) if node_name else "/referee/enemy_state"
+		enemy_topic = rospy.get_param("~enemy_topic", default_enemy_topic)
 
-		cls._validate_params(team_color, my_cars, loop_hz, state_timeout_s, default_patrol_points)
+		cls._validate_params(team_color, my_cars, loop_hz, state_timeout_s, default_patrol_points, enemy_topic)
 		return cls(
 			team_color=team_color,
 			my_cars=my_cars,
 			loop_hz=loop_hz,
 			state_timeout_s=state_timeout_s,
 			default_patrol_points=default_patrol_points,
+			enemy_topic=enemy_topic,
 		)
 
 	@staticmethod
-	def _validate_params(team_color, my_cars, loop_hz, state_timeout_s, default_patrol_points):
+	def _validate_params(team_color, my_cars, loop_hz, state_timeout_s, default_patrol_points, enemy_topic):
 		if not isinstance(team_color, str):
 			raise ValueError("~team_color must be a string")
 
@@ -99,6 +107,9 @@ class TeamManager(object):
 
 		if not isinstance(default_patrol_points, list):
 			raise ValueError("~default_patrol_points must be a list")
+
+		if not isinstance(enemy_topic, str) or not enemy_topic:
+			raise ValueError("~enemy_topic must be a non-empty string")
 
 	def build_fallback_tasks(self):
 		fallback = {}
@@ -142,7 +153,9 @@ def main():
 	except Exception as exc:
 		rospy.logwarn("TeamManager param/init error: %s", exc)
 		# 当参数非法时使用保守默认值，确保节点保持可运行。
-		manager = TeamManager(team_color="red", my_cars=[], loop_hz=1, state_timeout_s=5.0)
+		node_name = rospy.get_name().strip("/")
+		default_enemy_topic = "/{}/enemy_state".format(node_name) if node_name else "/referee/enemy_state"
+		manager = TeamManager(team_color="red", my_cars=[], loop_hz=1, state_timeout_s=5.0, enemy_topic=default_enemy_topic)
 
 	manager.run()
 

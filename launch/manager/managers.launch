@@ -9,11 +9,11 @@
   </node>
 
   <!-- Blue Manager -->
-  <!-- <node pkg="robot_vs"
+  <node pkg="robot_vs"
         type="manager_node.py"
         name="blue_manager"
         output="screen"
         required="false">
     <rosparam command="load" file="$(find robot_vs)/config/manager/blue_manager.yaml" />
-  </node> -->
+  </node> 
 </launch>

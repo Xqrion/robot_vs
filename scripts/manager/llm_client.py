@@ -23,10 +23,10 @@ class LLMClient(object):
     def __init__(self, planner_fn=None, patrol_points=None, flank_offset=1.0):
         self._planner_fn = planner_fn
         self._patrol_points = patrol_points or [
-            {"x": 0.0, "y": 0.0},
             {"x": 1.5, "y": 0.0},
+            {"x": 0.0, "y": 0.0},
             {"x": 1.5, "y": 1.5},
-            {"x": 0.0, "y": 1.5},
+            {"x": 0.0, "y": 1.5},# zai yaml li mian qu shezhi!!!!
         ]
         self._flank_offset = float(flank_offset)
         self._patrol_hold_s = 3.0
@@ -154,7 +154,7 @@ class LLMClient(object):
             target=self._get_patrol_point(robot_id, robot_index),
             mode=1,
             reason="patrol (no visible enemy)",
-            timeout=8.0,
+            timeout=12.0, #时间尽量大一些 
         )
 
     def _next_patrol_task_if_ready(self, robot_id, robot_index, state, task_status, current_action):
@@ -172,7 +172,7 @@ class LLMClient(object):
                 action="STOP",
                 target={"x": 0.0, "y": 0.0},
                 mode=1,
-                reason="patrol hold before next waypoint",
+                reason="patrol SUCCESS and hold before next waypoint",
                 timeout=self._patrol_hold_s,
             )
 

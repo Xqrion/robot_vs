@@ -1,0 +1,11 @@
+<launch>
+  <arg name="referee_param_file" default="$(find robot_vs)/config/manager/referee.yaml" />
+
+  <node pkg="robot_vs"
+        type="referee_node.py"
+        name="referee"
+        output="screen"
+        required="false">
+    <rosparam command="load" file="$(arg referee_param_file)" />
+  </node>
+</launch>

@@ -4,7 +4,7 @@
 import threading
 
 import rospy
-from robot_vs.msg import RobotState
+from robot_vs.msg import RobotState, VisibleEnemies
 
 
 class GlobalObserver(object):
@@ -12,7 +12,7 @@ class GlobalObserver(object):
 
 	职责：
 	1) 订阅 /<ns>/robot_state（RobotState）
-	2) 订阅 /referee/enemy_state（预留接口）
+	2) 订阅 /<manager_name>/enemy_state（VisibleEnemies）
 	3) 缓存最新状态及接收时间戳
 	4) 对外提供带 stale 标记的结构化战场状态
 	"""
@@ -41,10 +41,10 @@ class GlobalObserver(object):
 			sub = rospy.Subscriber(topic, RobotState, self._robot_state_cb, callback_args=ns, queue_size=10)
 			self._robot_subscribers.append(sub)
 
-		# 敌方话题接口目前有意保持通用形态。
+		# 敌方话题使用强类型 VisibleEnemies，便于后续决策直接读取敌人坐标信息。
 		self._enemy_subscriber = rospy.Subscriber(
 			self.enemy_topic,
-			rospy.AnyMsg,
+			VisibleEnemies,
 			self._enemy_state_cb,
 			queue_size=10,
 		)
@@ -78,20 +78,20 @@ class GlobalObserver(object):
 		if msg is None:
 			return None
 
-		# rospy.AnyMsg 只有原始字节流；这里保留最小结构化视图。
-		if isinstance(msg, rospy.AnyMsg):
-			return {
-				"_type": "rospy.AnyMsg",
-				"size": len(msg._buff) if msg._buff is not None else 0,
-			}
+		if isinstance(msg, (str, bool, int, float)):
+			return msg
+
+		if isinstance(msg, (list, tuple)):
+			return [self._msg_to_dict(item) for item in msg]
 
 		result = {"_type": getattr(msg, "_type", msg.__class__.__name__)}
 		slots = getattr(msg, "__slots__", [])
 		for key in slots:
 			try:
-				result[key] = getattr(msg, key)
+				value = getattr(msg, key)
 			except Exception:
-				result[key] = None
+				value = None
+			result[key] = self._msg_to_dict(value)
 		return result
 
 	def get_battle_state(self):
