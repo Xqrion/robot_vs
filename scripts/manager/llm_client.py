@@ -493,7 +493,8 @@ class LLMClient(object):
             raise ValueError("empty LLM response")
 
         # 尝试从 Markdown 代码块中提取 JSON（```json ... ``` 或 ``` ... ```）
-        code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        # 使用贪婪匹配 .* 以完整捕获嵌套 JSON 对象
+        code_block = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
         if code_block:
             text = code_block.group(1)
 
