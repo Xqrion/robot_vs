@@ -3,13 +3,50 @@
 
 import json
 import math
+import os
+import re
 import random
 
+import requests
 import rospy
+
+# Kimi (Moonshot AI) API 地址
+KIMI_API_URL = "https://api.moonshot.cn/v1/chat/completions"
+
+# 系统提示模板，引导 LLM 返回格式化的 JSON 任务分配
+_SYSTEM_PROMPT_TEMPLATE = u"""\
+你是 robot_vs 对战游戏的 {team_color}方 战术规划助手。
+你的职责是根据当前战场快照，为每辆己方小车规划一条最优行动任务。
+
+【可用动作（action）】
+- GOTO  : 导航前往目标坐标 (target.x, target.y)
+- STOP  : 原地停车
+- ATTACK: 向目标坐标发起攻击
+
+【模式（mode）】
+- 0 = 待机   1 = 巡逻   2 = 攻击   3 = 撤退
+
+【战术要点】
+1. 血量 < 20 或 弹药 = 0 时，命令小车撤退（mode=3）到安全区域
+2. 发现可见敌人（visible_enemies 不为空）时，优先分配小车接近或攻击
+3. 无敌人时让小车按不同巡逻点轮换（mode=1）
+4. stale=true 表示该机器人状态已过期，对其发送 STOP（mode=0）
+5. 多辆小车时应协同配合，避免全部扎堆同一目标
+
+【严格输出格式】（纯 JSON 对象，不要有任何注释或额外文字）
+{{
+  "<robot_ns>": {{
+    "action": "GOTO|STOP|ATTACK",
+    "target": {{"x": <float>, "y": <float>}},
+    "mode": <0|1|2|3>,
+    "reason": "<中文原因>",
+    "timeout": <float>
+  }}
+}}"""
 
 
 class LLMClient(object):
-    """基于规则的任务规划器（模拟 LLM）。
+    """任务规划器：优先调用 Kimi LLM API，失败时自动退回规则引擎。
 
     输出格式：
     {
@@ -22,7 +59,8 @@ class LLMClient(object):
     }
     """
 
-    def __init__(self, planner_fn=None, patrol_points=None, flank_offset=0.1):
+    def __init__(self, planner_fn=None, patrol_points=None, flank_offset=0.1,
+                 enabled=False, api_key="", model="moonshot-v1-8k", timeout_s=10.0):
         self._planner_fn = planner_fn
         self._patrol_points = patrol_points or [
             {"x": 1.5, "y": 0.0},
@@ -36,10 +74,30 @@ class LLMClient(object):
         # {robot_id: {"idx": int, "hold_until": float, "last_success_task_id": int}}
         self._patrol_state = {}
 
-    def plan_tasks(self, battle_state):
-        """根据战场状态按确定性规则规划任务。
+        # Kimi LLM 配置
+        self._enabled = bool(enabled)
+        # api_key 优先使用构造参数，其次读取环境变量 MOONSHOT_API_KEY
+        self._api_key = str(api_key).strip() if api_key else os.environ.get("MOONSHOT_API_KEY", "")
+        self._model = str(model) if model else "moonshot-v1-8k"
+        self._timeout_s = float(timeout_s) if timeout_s and float(timeout_s) > 0 else 10.0
 
-        规则（便于测试）：
+        if self._enabled and self._api_key:
+            rospy.loginfo("[LLMClient] Kimi LLM enabled: model=%s timeout=%.1fs", self._model, self._timeout_s)
+        elif self._enabled:
+            rospy.logwarn(
+                "[LLMClient] LLM enabled but api_key is empty — falling back to rule-based planner. "
+                "Set ~llm/api_key in YAML or MOONSHOT_API_KEY env var."
+            )
+
+    # ------------------------------------------------------------------
+    # 公共接口
+    # ------------------------------------------------------------------
+
+    def plan_tasks(self, battle_state):
+        """根据战场状态规划任务。
+
+        优先调用 Kimi LLM API（当 enabled=True 且 api_key 有效时）；
+        LLM 调用失败或未启用时，自动退回以下规则引擎：
         1) 机器人状态缺失或过期 -> STOP
         2) 机器人死亡 -> STOP
         3) 任务失败 -> 重试巡逻点
@@ -50,6 +108,16 @@ class LLMClient(object):
         if self._planner_fn is not None:
             return self._planner_fn(battle_state)
 
+        # 尝试调用 Kimi LLM
+        if self._enabled and self._api_key:
+            try:
+                tasks = self._plan_with_llm(battle_state)
+                rospy.logdebug("[LLMClient] Kimi LLM planning succeeded: %s", list(tasks.keys()))
+                return tasks
+            except Exception as exc:
+                rospy.logwarn("[LLMClient] Kimi API failed, falling back to rule-based: %s", exc)
+
+        # 规则引擎兜底
         if not isinstance(battle_state, dict):
             return {}
 
@@ -367,13 +435,69 @@ class LLMClient(object):
             "y": float(y) + radius * math.sin(theta),
         }
 
-    def _call_remote_llm(self, prompt):
-        """预留：调用真实远端 LLM API 并返回原始文本。"""
-        raise NotImplementedError("Remote LLM API is not connected yet")
+    # ------------------------------------------------------------------
+    # Kimi LLM 集成
+    # ------------------------------------------------------------------
+
+    def _plan_with_llm(self, battle_state):
+        """调用 Kimi API 获取任务规划，返回任务字典。
+
+        抛出异常时由调用方捕获并退回规则引擎。
+        """
+        team_color = battle_state.get("team_color", "unknown") if isinstance(battle_state, dict) else "unknown"
+        system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(team_color=team_color)
+        user_message = json.dumps(battle_state, ensure_ascii=False, indent=2, default=str)
+        raw_text = self._call_remote_llm(system_prompt, user_message)
+        tasks = self._parse_llm_json(raw_text)
+        return tasks
+
+    def _call_remote_llm(self, system_prompt, user_message):
+        """调用 Kimi (Moonshot AI) Chat Completions API，返回模型原始回复文本。
+
+        参数：
+            system_prompt  -- 系统提示（角色设定 + 输出格式要求）
+            user_message   -- 用户消息（战场快照 JSON 字符串）
+
+        返回：
+            模型回复的字符串内容
+
+        抛出：
+            requests.HTTPError / requests.Timeout / ValueError 等
+        """
+        headers = {
+            "Authorization": "Bearer {}".format(self._api_key),
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.3,
+            "response_format": {"type": "json_object"},
+        }
+        resp = requests.post(
+            KIMI_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=self._timeout_s,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
 
     def _parse_llm_json(self, text):
-        """预留：解析远端 LLM 返回的 JSON 文本。"""
-        data = json.loads(text)
+        """解析 LLM 返回的 JSON 文本，支持从 Markdown 代码块中提取。"""
+        if not text:
+            raise ValueError("empty LLM response")
+
+        # 尝试从 Markdown 代码块中提取 JSON（```json ... ``` 或 ``` ... ```）
+        code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if code_block:
+            text = code_block.group(1)
+
+        data = json.loads(text.strip())
         if not isinstance(data, dict):
-            raise ValueError("LLM response must be a dict")
+            raise ValueError("LLM response must be a JSON object (dict), got: {}".format(type(data)))
         return data

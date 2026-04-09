@@ -116,7 +116,7 @@ Manager 是每个阵营的"指挥中枢"，以固定频率（`loop_hz`，默认 
 ```
 1. GlobalObserver.get_battle_state()   → 收集所有小车的最新 RobotState
 2. BattleStateFormatter.build()        → 将状态格式化成 LLM 可读的文本
-3. LLMClient.plan_tasks()              → 调用 LLM（或规则引擎）生成任务字典
+3. LLMClient.plan_tasks()              → 调用 Kimi LLM（或规则引擎）生成任务字典
 4. TaskDispatcher.dispatch()           → 将任务逐一发布为 TaskCommand 消息
 ```
 
@@ -127,8 +127,36 @@ Manager 是每个阵营的"指挥中枢"，以固定频率（`loop_hz`，默认 
 | `manager_node.py` | 节点入口，组装上述四个组件并驱动循环 |
 | `global_observer.py` | 订阅所有 `/<ns>/robot_state`，超过 `state_timeout_s` 未更新则标记失联 |
 | `battle_state_formatter.py` | 将 RobotState 字典转换为 LLM Prompt 文本 |
-| `llm_client.py` | 调用 LLM API，解析返回的 JSON 任务列表；LLM 不可用时走规则兜底 |
+| `llm_client.py` | 优先调用 Kimi (Moonshot AI) LLM API 规划任务；API 不可用时走规则兜底 |
 | `task_dispatcher.py` | 为每辆小车发布 `TaskCommand`；相同任务不重复下发（去重机制保护） |
+
+### Kimi LLM 集成
+
+`LLMClient` 同时支持 **Kimi LLM 模式** 和 **规则引擎模式**：
+
+| 条件 | 行为 |
+|------|------|
+| `llm.enabled: true` 且 `api_key` 非空 | 调用 Kimi API 做战术规划，失败时自动退回规则引擎 |
+| `llm.enabled: false` 或 `api_key` 为空 | 直接使用内置规则引擎（无需网络） |
+
+**Kimi API 调用流程：**
+
+```
+BattleStateFormatter → JSON 战场快照
+        │
+        ▼
+LLMClient._plan_with_llm()
+  ├─ 构造系统提示（角色设定 + 可用动作 + 输出格式）
+  ├─ POST https://api.moonshot.cn/v1/chat/completions
+  │      model: moonshot-v1-8k（可配置）
+  │      response_format: {"type": "json_object"}
+  └─ 解析 JSON → 任务字典
+        │   失败时
+        ▼
+  规则引擎兜底（patrol / attack / retreat 策略）
+```
+
+**获取 Kimi API Key：** 访问 [Moonshot 开放平台](https://platform.moonshot.cn/) 注册并创建 API Key。
 
 ### 参数配置
 
@@ -143,10 +171,13 @@ default_patrol_points:   # LLM 不可用时的默认巡逻点
   - [0.5, 0.0]
   - [1.0, 1.0]
 llm:
-  enabled: false         # true 时调用真实 LLM API
-  model: "gpt-4o-mini"
-  timeout_s: 8
+  enabled: false          # true 时调用 Kimi API
+  model: "moonshot-v1-8k" # moonshot-v1-8k / moonshot-v1-32k / moonshot-v1-128k
+  api_key: ""             # 你的 Moonshot API Key（也可通过 MOONSHOT_API_KEY 环境变量传入）
+  timeout_s: 10           # API 调用超时（秒）
 ```
+
+> **环境变量优先级**：若 YAML 中 `api_key` 为空，`LLMClient` 会自动读取 `MOONSHOT_API_KEY` 环境变量作为备选。
 
 ### 启动
 

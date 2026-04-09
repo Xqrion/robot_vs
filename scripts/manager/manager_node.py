@@ -24,6 +24,7 @@ class TeamManager(object):
 	def __init__(self, team_color="red", my_cars=None, loop_hz=0.2,
 				 state_timeout_s=2.0, default_patrol_points=None,
 				 enemy_topic="/referee/enemy_state",
+				 llm_enabled=False, llm_api_key="", llm_model="moonshot-v1-8k", llm_timeout_s=10.0,
 				 observer=None, formatter=None, llm_client=None, dispatcher=None):
 		if my_cars is None:
 			my_cars = []
@@ -42,19 +43,25 @@ class TeamManager(object):
 		self.formatter = formatter if formatter is not None else BattleStateFormatter()
 		self.llm_client = llm_client if llm_client is not None else LLMClient(
 			patrol_points=(self.default_patrol_points or None),
+			enabled=llm_enabled,
+			api_key=llm_api_key,
+			model=llm_model,
+			timeout_s=llm_timeout_s,
 		)
 		self.dispatcher = dispatcher if dispatcher is not None else TaskDispatcher(
 			my_cars=self.my_cars,
 		)
 
 		rospy.loginfo(
-			"TeamManager initialized: team_color=%s my_cars=%s loop_hz=%.3f state_timeout_s=%.2f enemy_topic=%s patrol_points=%s",
+			"TeamManager initialized: team_color=%s my_cars=%s loop_hz=%.3f state_timeout_s=%.2f enemy_topic=%s patrol_points=%s llm_enabled=%s llm_model=%s",
 			self.team_color,
 			self.my_cars,
 			self.loop_hz,
 			self.state_timeout_s,
 			self.enemy_topic,
 			self.default_patrol_points,
+			llm_enabled,
+			llm_model,
 		)
 
 	@classmethod
@@ -68,6 +75,15 @@ class TeamManager(object):
 		default_enemy_topic = "/{}/enemy_state".format(node_name) if node_name else "/referee/enemy_state"
 		enemy_topic = rospy.get_param("~enemy_topic", default_enemy_topic)
 
+		# LLM 配置（从 YAML 中的 llm: 子键读取）
+		llm_cfg = rospy.get_param("~llm", {})
+		if not isinstance(llm_cfg, dict):
+			llm_cfg = {}
+		llm_enabled = bool(llm_cfg.get("enabled", False))
+		llm_model = str(llm_cfg.get("model", "moonshot-v1-8k"))
+		llm_timeout_s = float(llm_cfg.get("timeout_s", 10.0))
+		llm_api_key = str(llm_cfg.get("api_key", ""))
+
 		cls._validate_params(team_color, my_cars, loop_hz, state_timeout_s, default_patrol_points, enemy_topic)
 		return cls(
 			team_color=team_color,
@@ -76,6 +92,10 @@ class TeamManager(object):
 			state_timeout_s=state_timeout_s,
 			default_patrol_points=default_patrol_points,
 			enemy_topic=enemy_topic,
+			llm_enabled=llm_enabled,
+			llm_api_key=llm_api_key,
+			llm_model=llm_model,
+			llm_timeout_s=llm_timeout_s,
 		)
 
 	@staticmethod

@@ -19,13 +19,35 @@
 
 - 支持 **仿真环境** 与 **现实环境** 下的多机器人独立运行
 - 采用 **红方 / 蓝方 两个阵营** 的对抗结构
-  - 每个阵营有一个 Manager 节点负责 LLM 决策与任务分配
+  - 每个阵营有一个 Manager 节点负责 **Kimi LLM 决策**与任务分配（LLM 不可用时自动退回规则引擎）
   - 每辆小车运行一个 Car Agent，通过技能系统执行 GOTO / STOP / ATTACK 三类动作
   - 小车携带 `mode` 字段区分待机 / 巡逻 / 攻击模式
 - 基于 **命名空间 + TF 前缀** 实现多机话题隔离，防止冲突
 - `TaskCommand` / `RobotState` 消息形成完整的任务下发与状态反馈闭环
 - 仿真与现实话题结构保持一致，便于算法迁移
 - 提供编辑好的 Rviz 可视化界面
+
+---
+
+## Kimi LLM 快速配置
+
+1. 在 [Moonshot 开放平台](https://platform.moonshot.cn/) 注册并获取 API Key。
+2. 在 `config/manager/red_manager.yaml`（和 `blue_manager.yaml`）中填入：
+
+   ```yaml
+   llm:
+     enabled: true
+     model: "moonshot-v1-8k"
+     api_key: "sk-xxxxxxxxxxxxxxxx"  # 替换为你的实际 Key
+     timeout_s: 10
+   ```
+
+   > 也可以通过环境变量传入（不写入文件，更安全）：
+   > ```bash
+   > export MOONSHOT_API_KEY="sk-xxxxxxxxxxxxxxxx"
+   > ```
+
+3. 正常启动 Manager 即可，LLM 不可用时自动退回规则引擎，不影响对抗运行。
 
 ---
 

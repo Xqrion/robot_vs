@@ -8,6 +8,7 @@ default_patrol_points:
   - [0.5, 0.0]
   - [0.0, 1.2]
 llm:
-  enabled: false
-  model: "gpt-4o-mini"
-  timeout_s: 8
+  enabled: false          # true 时调用 Kimi API；false 时使用规则引擎
+  model: "moonshot-v1-8k" # 可选: moonshot-v1-8k / moonshot-v1-32k / moonshot-v1-128k
+  api_key: ""             # 填入你的 Moonshot API Key（或通过 MOONSHOT_API_KEY 环境变量传入）
+  timeout_s: 10
