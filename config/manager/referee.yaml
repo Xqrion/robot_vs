@@ -3,10 +3,10 @@ discover_hz: 1.0
 
 default_hp: 100
 default_ammo: 50.0
-fire_range: 5.0
-hit_width: 0.5
+fire_range: 3.0
+hit_width: 0.1
 fire_damage: 20
-vision_range: 4.0
+vision_range: 2.0
 
 fov_deg: 120.0
 map_topic: "/map"
