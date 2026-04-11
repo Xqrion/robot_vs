@@ -5,6 +5,7 @@ import threading
 
 import actionlib  # 预留给后续 action client 集成使用。
 import rospy
+from actionlib_msgs.msg import GoalID
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from move_base_msgs.msg import MoveBaseActionResult
@@ -55,6 +56,11 @@ class SkillManager(object):
         self._goal_pub = rospy.Publisher(
             "/{}/move_base_simple/goal".format(self.ns),
             PoseStamped,
+            queue_size=1,
+        )
+        self._cancel_pub = rospy.Publisher(
+            "/{}/move_base/cancel".format(self.ns),
+            GoalID,
             queue_size=1,
         )
         self._cmd_vel_pub = rospy.Publisher(
@@ -121,6 +127,11 @@ class SkillManager(object):
             self._cmd_vel_pub.publish(Twist())
             return
         self._cmd_vel_pub.publish(cmd_vel)
+
+    def cancel_nav_goal(self):
+        """取消当前 move_base 目标，进入空闲状态。"""
+        self._cancel_pub.publish(GoalID())
+        self.reset_nav_status()
 
     def publish_fire_event(self, x, y, yaw):
         with self._lock:

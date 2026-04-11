@@ -1,5 +1,6 @@
 <launch>
   <arg name="referee_param_file" default="$(find robot_vs)/config/manager/referee.yaml" />
+  <arg name="viz_param_file" default="$(find robot_vs)/config/manager/viz.yaml" />
 
   <node pkg="robot_vs"
         type="referee_node.py"
@@ -7,5 +8,13 @@
         output="screen"
         required="false">
     <rosparam command="load" file="$(arg referee_param_file)" />
+  </node>
+
+  <node pkg="robot_vs"
+        type="viz_node.py"
+        name="viz_node" 
+        output="screen">
+    <rosparam command="load" file="$(arg referee_param_file)" />
+    <rosparam command="load" file="$(arg viz_param_file)" />
   </node>
 </launch>

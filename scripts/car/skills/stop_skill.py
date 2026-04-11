@@ -7,19 +7,21 @@ from skills.base_skill import BaseSkill, SUCCESS
 
 
 class StopSkill(BaseSkill):
-    """通过发布零速度立即停止机器人。
+    """通过取消导航目标并发布零速度来停止机器人。
 
-    在一个 tick 后返回 SUCCESS，表示停止指令已发送。
-    当 task_engine 的当前任务仍为 STOP 时，会持续调用 update()，
-    因此每个 tick 都会重复发布零速度指令。
+    该技能会发起真正的 move_base 目标取消，而不是把当前位姿当作新目标重设。
     """
 
     def start(self, params=None):
+        # 取消当前导航目标
+        self.skill_manager.cancel_nav_goal()
+
+        # 发布零速度，确保机器人立即停止
         self.skill_manager.publish_stop_velocity()
-        rospy.loginfo("[%s] StopSkill start", self.skill_manager.ns)
+
+        rospy.loginfo("[%s] StopSkill start: navigation cancelled", self.skill_manager.ns)
 
     def update(self):
-        self.skill_manager.publish_stop_velocity()
         self._status = SUCCESS
         return self._status
 
