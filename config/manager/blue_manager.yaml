@@ -10,4 +10,4 @@ default_patrol_points:
 llm:
   enabled: true
   service_url: "http://127.0.0.1:8001/plan"
-  # timeout_s: 120
+  timeout_s: 60

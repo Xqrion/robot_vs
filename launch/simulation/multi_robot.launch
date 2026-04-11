@@ -38,8 +38,8 @@
   <!-- 4.4 启动红方AMCL -->
   <include file="$(find robot_vs)/launch/simulation/amcl.launch">
     <arg name="robot_namespace" value="robot_red" />
-    <!-- <arg name="initial_pose_x" value="-2.0"/> -->
-    <arg name="initial_pose_x" value="-1.5"/>
+    <arg name="initial_pose_x" value="-2.0"/>
+    <!-- <arg name="initial_pose_x" value="-1.5"/> -->
     <arg name="initial_pose_y" value="0.0"/>
     <arg name="initial_pose_a" value="0.0"/>
   </include>
