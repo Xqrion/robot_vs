@@ -11,6 +11,7 @@ from robot_vs.msg import FireEvent
 from robot_vs.msg import RobotState
 from robot_vs.msg import TeamMacroState
 from robot_vs.msg import VisibleEnemies
+from nav_msgs.msg import OccupancyGrid
 
 
 class RefereeNode(object):
@@ -33,6 +34,19 @@ class RefereeNode(object):
         self.hit_width = float(rospy.get_param("~hit_width", 0.5))
         self.fire_damage = int(rospy.get_param("~fire_damage", 20))
         self.vision_range = float(rospy.get_param("~vision_range", 4.0))
+
+        self.fov_deg = float(rospy.get_param("~fov_deg", 120.0))
+        self.fov_rad = math.radians(self.fov_deg)
+        self.map_topic = str(rospy.get_param("~map_topic", "/map"))
+        self.occ_threshold = int(rospy.get_param("~occ_threshold", 50))  # 0~100, >=阈值视为障碍
+        self.block_unknown = bool(rospy.get_param("~block_unknown", True))  # -1 unknown 是否当障碍
+
+        self._map = None
+        self._map_info = None
+        self._map_data = None
+        self._map_stamp = None
+
+        self._map_sub = rospy.Subscriber(self.map_topic, OccupancyGrid, self._on_map, queue_size=1)
 
         self._lock = threading.RLock()
 
@@ -182,6 +196,70 @@ class RefereeNode(object):
         # 2D 叉积模长=到射线垂距（方向向量已单位化）
         perp = abs(dx * dir_y - dy * dir_x)
         return perp < self.hit_width
+    def _world_to_map(self, x, y):
+        """世界坐标 -> 栅格坐标 (mx,my)，失败返回 None"""
+        if self._map_info is None:
+            return None
+        origin = self._map_info.origin.position
+        res = float(self._map_info.resolution)
+        mx = int((x - origin.x) / res)
+        my = int((y - origin.y) / res)
+        if mx < 0 or my < 0 or mx >= self._map_info.width or my >= self._map_info.height:
+            return None
+        return mx, my
+
+    def _grid_index(self, mx, my):
+        return my * self._map_info.width + mx
+
+    def _cell_blocked(self, mx, my):
+        """该栅格是否视为障碍"""
+        idx = self._grid_index(mx, my)
+        val = int(self._map_data[idx])
+        if val < 0:
+            return bool(self.block_unknown)
+        return val >= self.occ_threshold
+
+    def _bresenham(self, x0, y0, x1, y1):
+        """Bresenham 栅格线算法，yield (x,y)"""
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        x, y = x0, y0
+        while True:
+            yield x, y
+            if x == x1 and y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+
+    def _has_line_of_sight(self, x0, y0, x1, y1):
+        """用 /map 判断两点之间是否无遮挡。没有地图时默认 True。"""
+        with self._lock:
+            if self._map_info is None or self._map_data is None:
+                return True
+            p0 = self._world_to_map(x0, y0)
+            p1 = self._world_to_map(x1, y1)
+            if p0 is None or p1 is None:
+                # 在地图外：保守做法可以返回 False；想放宽可返回 True
+                return False
+            x0m, y0m = p0
+            x1m, y1m = p1
+
+            first = True
+            for mx, my in self._bresenham(x0m, y0m, x1m, y1m):
+                if first:
+                    first = False
+                    continue  # 跳过起点格（避免自己所在格被膨胀层/噪声误判）
+                if self._cell_blocked(mx, my):
+                    return False
+            return True
 
     def _on_fire_event(self, msg, topic_ns):
         shooter_ns = self._normalize_ns(msg.shooter_ns) or self._normalize_ns(topic_ns)
@@ -247,6 +325,9 @@ class RefereeNode(object):
                     if old_hp > 0 and new_hp == 0:
                         rospy.loginfo("[referee] kill: shooter=%s target=%s", shooter_ns, enemy_ns)
 
+    def _angle_diff(self, a, b):
+        return math.atan2(math.sin(a - b), math.cos(a - b))
+    
     def _build_visible_enemies(self, observer_team):
         enemy_team = "blue" if observer_team == "red" else "red"
 
@@ -261,6 +342,7 @@ class RefereeNode(object):
                 enemies.append((ns, state))
 
         visible = []
+        half_fov = 0.5 * self.fov_rad
         for enemy_ns, enemy_state in enemies:
             ex = float(enemy_state.get("x", 0.0))
             ey = float(enemy_state.get("y", 0.0))
@@ -269,9 +351,20 @@ class RefereeNode(object):
             for _, friendly_state in friendlies:
                 fx = float(friendly_state.get("x", 0.0))
                 fy = float(friendly_state.get("y", 0.0))
-                if math.hypot(ex - fx, ey - fy) < self.vision_range:
-                    seen = True
-                    break
+                fyaw = float(friendly_state.get("yaw", 0.0))
+
+                dist = math.hypot(ex - fx, ey - fy)
+                if dist > self.vision_range:
+                 continue
+
+                bearing = math.atan2(ey - fy, ex - fx)
+                if abs(self._angle_diff(bearing, fyaw)) > half_fov:
+                 continue
+
+                if not self._has_line_of_sight(fx, fy, ex, ey):
+                 continue
+                seen = True
+                break
 
             if seen:
                 info = EnemyInfo()
@@ -356,6 +449,12 @@ class RefereeNode(object):
             self._publish_macro_state()
             main_rate.sleep()
 
+    def _on_map(self, msg):
+        with self._lock:
+            self._map = msg
+            self._map_info = msg.info
+            self._map_data = msg.data  # tuple/list of int8
+            self._map_stamp = rospy.Time.now().to_sec()
 
 def main():
     rospy.init_node("referee_node", anonymous=False)
