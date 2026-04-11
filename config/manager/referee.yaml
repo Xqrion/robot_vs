@@ -7,3 +7,8 @@ fire_range: 5.0
 hit_width: 0.5
 fire_damage: 20
 vision_range: 4.0
+
+fov_deg: 120.0
+map_topic: "/map"
+occ_threshold: 50
+block_unknown: true
