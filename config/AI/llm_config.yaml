@@ -1,0 +1,45 @@
+# ============================================
+# 大模型配置文件
+# 切换模型只需要改 active_model 这一行
+# API Key 统一从环境变量读取：
+#   LLM_API_KEY_RED / LLM_API_KEY_BLUE
+#   若未设置分边 key，则回退 LLM_API_KEY
+#   若仍未设置，则回退 LLM_API
+# ============================================
+
+active_model: "kimi-turbo"       # <- 改这里就能切换default/fallback模型, 优先级低于下方side
+
+models:
+  kimi-turbo:
+    base_url: "https://api.moonshot.cn/v1"
+    model_name: "kimi-k2-turbo-preview"
+    timeout_s: 30.0
+
+#RUBBISH!!!
+  glm:
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    model_name: "glm-4.7-flashX"
+    timeout_s: 30.0
+
+  doubao:
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    model_name: "doubao-1-5-pro-256k-250115"
+    timeout_s: 30.0
+
+  deepseek:
+    base_url: "https://api.deepseek.com"
+    model_name: "deepseek-chat"
+    timeout_s: 30.0
+
+  # 以后加新模型，在这里补一段就行
+  qwen-flash:
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model_name: "qwen3.5-flash"
+    timeout_s: 30.0
+
+# 红蓝双方可以用不同模型（可选）
+sides:
+  red:
+    active_model: "kimi-turbo"       # 红方模型
+  blue:
+    active_model: "glm"         # 蓝方模型

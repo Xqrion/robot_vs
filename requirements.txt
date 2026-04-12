@@ -45,6 +45,7 @@ openai==2.31.0
 packaging==26.0
 pydantic==2.12.5
 pydantic_core==2.41.5
+PyYAML==6.0.2
 PySocks @ file:///home/task_176175233246416/conda-bld/pysocks_1761753011536/work
 python_qt_binding==0.4.4
 qt-dotgraph==0.4.2
