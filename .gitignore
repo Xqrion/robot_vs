@@ -1,4 +1,25 @@
-*.pyc
-__pycache__/
+# ROS 编译文件
 build/
+devel/
+install/
+logs/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 编辑器文件
 .vscode/
+.idea/
+*~
+*.swp
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 临时数据
+*.bag
+*.log
+
+*.jsonl

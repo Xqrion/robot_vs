@@ -17,7 +17,7 @@ class AttackSkill(BaseSkill):
         super(AttackSkill, self).__init__(skill_manager)
         self.target_x = 0.0
         self.target_y = 0.0
-        self.yaw_tolerance = 0.12
+        self.yaw_tolerance = 0.02
         self.angular_speed = 0.7
         self.fire_cooldown_s = 2.0
         self.pose_lost_timeout_s = 1.5
@@ -29,7 +29,7 @@ class AttackSkill(BaseSkill):
         params = params or {}
         self.target_x = float(params.get("target_x", 0.0))
         self.target_y = float(params.get("target_y", 0.0))
-        self.yaw_tolerance = float(params.get("yaw_tolerance", 0.12))
+        self.yaw_tolerance = float(params.get("yaw_tolerance", 0.02))
         self.angular_speed = abs(float(params.get("angular_speed", 0.7)))
         self.fire_cooldown_s = float(params.get("fire_cooldown_s", 2.0))
         self.pose_lost_timeout_s = float(params.get("pose_lost_timeout_s", 1.5))

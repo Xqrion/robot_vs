@@ -10,6 +10,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from move_base_msgs.msg import MoveBaseActionResult
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf.transformations import euler_from_quaternion
 from robot_vs.msg import BattleMacroState
 from robot_vs.msg import FireEvent
 from robot_vs.msg import RobotState
@@ -69,6 +70,13 @@ class SkillManager(object):
             Twist,
             queue_size=1,
         )
+
+        # 死亡锁存：保证“死亡处理”只触发一次
+        self._dead_latched = False
+
+        # 死亡后持续发布 stop 的定时器（默认 None，死亡时创建）
+        self._dead_stop_timer = None
+        self._dead_stop_hz = float(rospy.get_param("~dead_stop_hz", 20.0))
         self._state_pub = rospy.Publisher(
             "/{}/robot_state".format(self.ns),
             RobotState,
@@ -119,8 +127,59 @@ class SkillManager(object):
     # 发布器辅助方法
     # ------------------------------------------------------------------
 
+    def publish_nav_cancel(self):
+        """取消 move_base 的所有目标。"""
+        try:
+            self._cancel_pub.publish(GoalID())  # 空 GoalID = cancel all
+        except Exception as exc:
+            rospy.logwarn("[%s] publish_nav_cancel failed: %s", self.ns, exc)
+
+    def _dead_stop_tick(self, _event):
+        """
+        死亡后持续执行：反复发布 0 速度，防止 move_base/其他节点残留输出把车带跑。
+        """
+        # 只要不存活就持续压制
+        with self._lock:
+            alive = bool(self.is_alive)
+        if alive:
+            return
+        self.publish_stop_velocity()
+
+    def _enter_dead_state(self):
+        """
+        死亡瞬间触发一次：cancel move_base + stop 当前技能 + 启动持续 stop 定时器
+        """
+        rospy.logwarn("[%s] detected DEAD -> cancel move_base and STOP,无问题只做提示其死亡", self.ns)
+
+        # 1) 先取消导航，避免 move_base 继续输出 cmd_vel
+        self.publish_nav_cancel()
+
+        # 2) 立刻发一次 stop
+        self.publish_stop_velocity()
+
+        # 3) 停掉当前技能（避免技能继续 update 发指令/发 fire_event）
+        self.stop_active_skill()
+
+        # 4) 强制状态显示为 STOP（可选，但有助于日志与 RobotState）
+        self.active_action = "STOP"
+        try:
+            self.active_skill = self.make_skill("STOP", {})
+            self.active_skill.start({})
+        except Exception as exc:
+            rospy.logwarn("[%s] start StopSkill on death failed: %s", self.ns, exc)
+            self.active_skill = None
+
+        # 5) 启动“死亡持续 stop”定时器（只启动一次）
+        if self._dead_stop_timer is None:
+            period = 1.0 / max(1.0, float(self._dead_stop_hz))
+            self._dead_stop_timer = rospy.Timer(rospy.Duration(period), self._dead_stop_tick)
+
     def publish_nav_goal(self, goal):
-        """向 move_base_simple 发布 PoseStamped 目标。"""
+        """向 move_base_simple 发布 PoseStamped 目标。死亡后禁止导航。"""
+        with self._lock:
+            alive = bool(self.is_alive)
+        if not alive:
+            return
         self._goal_pub.publish(goal)
 
     def publish_stop_velocity(self):
@@ -136,8 +195,8 @@ class SkillManager(object):
         self._cmd_vel_pub.publish(cmd_vel)
 
     def cancel_nav_goal(self):
-        """取消当前 move_base 目标，进入空闲状态。"""
-        self._cancel_pub.publish(GoalID())
+        """取消当前 move_base 目标，并重置本地导航状态。"""
+        self.publish_nav_cancel()
         self.reset_nav_status()
 
     def publish_fire_event(self, x, y, yaw):
@@ -208,10 +267,26 @@ class SkillManager(object):
             return
 
         hp, ammo, alive = state
+        hp = max(0.0, float(hp))
+        ammo = max(0.0, float(ammo))
+        new_alive = bool(alive and hp > 0.0)
+
+        just_died = False
         with self._lock:
-            self.hp = max(0.0, float(hp))
-            self.ammo = max(0.0, float(ammo))
-            self.is_alive = bool(alive and self.hp > 0.0)
+            prev_alive = bool(self.is_alive)
+
+            self.hp = hp
+            self.ammo = ammo
+            self.is_alive = new_alive
+
+            # 仅在“从活->死”的瞬间触发一次
+            if prev_alive and (not new_alive) and (not self._dead_latched):
+                self._dead_latched = True
+                just_died = True
+
+        # 注意：不要在锁内做 stop/cancel（避免潜在死锁）
+        if just_died:
+            self._enter_dead_state()
 
     # ------------------------------------------------------------------
     # 技能生命周期与工厂
@@ -231,6 +306,7 @@ class SkillManager(object):
         from skills.goto_skill import GoToSkill
         from skills.stop_skill import StopSkill
         from skills.attack_skill import AttackSkill
+        from skills.rotate_skill import RotateSkill
 
         action = str(action_type).upper()
         if action == "GOTO":
@@ -239,6 +315,8 @@ class SkillManager(object):
             return StopSkill(self)
         elif action == "ATTACK":
             return AttackSkill(self)
+        elif action == "ROTATE":
+            return RotateSkill(self)
         else:
             rospy.logwarn(
                 "[%s] SkillManager: unknown action_type '%s', defaulting to StopSkill",
@@ -247,6 +325,15 @@ class SkillManager(object):
             return StopSkill(self)
 
     def switch_skill(self, action_type, task):
+        with self._lock:
+            alive = bool(self.is_alive)
+
+        if not alive:
+            # 死亡后：任何任务都强制变成 STOP，但不要 return
+            action_type = "STOP"
+            task = task or {}
+            self.publish_nav_cancel()
+
         self.stop_active_skill()
         self.active_action = str(action_type).upper()
         self.active_skill = self.make_skill(action_type, task)
@@ -289,6 +376,15 @@ class SkillManager(object):
     def get_current_pose(self):
         with self._lock:
             return self._latest_pose
+            
+    def get_current_yaw(self):
+        with self._lock:
+            pose = self._latest_pose
+        if pose is None:
+             return None
+        q = pose.orientation
+        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        return yaw
 
     def get_map_info(self):
         with self._lock:
@@ -308,13 +404,16 @@ class SkillManager(object):
         msg.ammo = self.default_ammo
         msg.alive = True
         msg.in_combat = (self.active_action == "ATTACK")
-
+        msg.yaw = 0.0
         with self._lock:
             msg.hp = float(self.hp)
             msg.ammo = float(self.ammo)
             msg.alive = bool(self.is_alive)
             if self._latest_pose is not None:
                 msg.pose = self._latest_pose
+                q = self._latest_pose.orientation
+                _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+                msg.yaw = float(yaw)
             msg.twist = self._latest_twist
             msg.current_task_id = self._feedback["task_id"]
             msg.current_action = self._feedback["current_action"]
@@ -322,3 +421,7 @@ class SkillManager(object):
             msg.mode = self._feedback["mode"]
 
         self._state_pub.publish(msg)
+        
+         # 保险：死亡状态下持续 stop（即使 dead_stop_timer 因某种原因没启动）
+        if not msg.alive:
+            self.publish_stop_velocity()

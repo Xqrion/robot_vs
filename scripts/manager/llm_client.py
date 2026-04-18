@@ -7,9 +7,19 @@ import random
 
 import rospy
 
+import requests
+
+
+try:
+    text_type = unicode  # type: ignore[name-defined]
+    binary_type = str
+except NameError:
+    text_type = str
+    binary_type = bytes
+
 
 class LLMClient(object):
-    """基于规则的任务规划器（模拟 LLM）。
+    """基于规则的任务规划器（模拟 LLM) 。
 
     输出格式：
     {
@@ -22,7 +32,8 @@ class LLMClient(object):
     }
     """
 
-    def __init__(self, planner_fn=None, patrol_points=None, flank_offset=0.1):
+    def __init__(self, planner_fn=None, patrol_points=None, flank_offset=0.1,
+                 use_llm=True, llm_service_url="http://127.0.0.1:8001/plan", llm_timeout_s=8.0):
         self._planner_fn = planner_fn
         self._patrol_points = patrol_points or [
             {"x": 1.5, "y": 0.0},
@@ -35,6 +46,10 @@ class LLMClient(object):
         # 无敌人场景下的逐车巡逻状态。
         # {robot_id: {"idx": int, "hold_until": float, "last_success_task_id": int}}
         self._patrol_state = {}
+        self._use_llm = bool(use_llm)
+        self._llm_service_url = str(llm_service_url)
+        self._llm_timeout_s = float(llm_timeout_s)
+        self._session = requests.Session()
 
     def plan_tasks(self, battle_state):
         """根据战场状态按确定性规则规划任务。
@@ -57,6 +72,25 @@ class LLMClient(object):
         if not robot_ids:
             return {}
 
+        if self._use_llm:
+            try:
+                payload = {
+                    "battle_state": battle_state,
+                    "robot_ids": list(robot_ids),
+                }
+                response = self._session.post(
+                    self._llm_service_url,
+                    json=payload,
+                    timeout=self._llm_timeout_s,
+                )
+                response.raise_for_status()
+                parsed = response.json()
+                if isinstance(parsed, dict) and isinstance(parsed.get("tasks"), dict):
+                    parsed = parsed.get("tasks")
+                return self._normalize_llm_tasks(parsed, robot_ids)
+            except Exception as exc:
+                rospy.logwarn("LLMClient: LLM planning failed, use rule fallback: %r", exc)
+
         visible_enemies = self._extract_visible_enemies(battle_state)
         tasks = {}
         for idx, robot_id in enumerate(robot_ids):
@@ -74,8 +108,8 @@ class LLMClient(object):
         hp = self._to_float(self._read_value(state, "hp", 100.0), 100.0)
         ammo = self._to_float(self._read_value(state, "ammo", 0.0), 0.0)
         in_combat = bool(self._read_value(state, "in_combat", False))
-        task_status = str(self._read_value(state, "task_status", "")).upper()
-        current_action = str(self._read_value(state, "current_action", "")).upper()
+        task_status = self._to_text(self._read_value(state, "task_status", ""), "").upper()
+        current_action = self._to_text(self._read_value(state, "current_action", ""), "").upper()
 
         if (not alive) or hp <= 0.0:
             return self._stop_task("robot not alive", timeout=5.0)
@@ -276,13 +310,14 @@ class LLMClient(object):
     def _build_task(self, action, target, mode, reason, timeout):
         target_point = self._normalize_patrol_point(target)
         return {
-            "action": str(action),
+            "action": self._to_text(action, "STOP"),
             "target": {
-                "x": float(target_point["x"]),
-                "y": float(target_point["y"]),
+                "x": float(target_point.get("x", 0.0)),
+                "y": float(target_point.get("y", 0.0)),
+                "yaw": float(target_point.get("yaw", 0.0)),
             },
             "mode": int(mode),
-            "reason": str(reason),
+            "reason": self._to_text(reason, "llm decision"),
             "timeout": float(timeout),
         }
 
@@ -341,20 +376,38 @@ class LLMClient(object):
         except Exception:
             return float(default)
 
+    def _to_text(self, value, default=u""):
+        if value is None:
+            value = default
+
+        try:
+            if isinstance(value, text_type):
+                return value
+            if isinstance(value, binary_type):
+                return value.decode("utf-8", "replace")
+            return text_type(value)
+        except Exception:
+            try:
+                return text_type(default)
+            except Exception:
+                return u""
+
     def _normalize_patrol_point(self, point):
         if isinstance(point, dict):
             return {
                 "x": float(point.get("x", 0.0)),
                 "y": float(point.get("y", 0.0)),
+                "yaw": float(point.get("yaw", 0.0)),
             }
-
+        
         if isinstance(point, (list, tuple)) and len(point) >= 2:
+            yaw = float(point[2]) if len(point) >= 3 else 0.0
             return {
                 "x": float(point[0]),
                 "y": float(point[1]),
+                "yaw": yaw,
             }
-
-        return {"x": 0.0, "y": 0.0}
+        return {"x": 0.0, "y": 0.0, "yaw": 0.0}
 
     def _random_near_enemy_point(self, x, y):
         # 在敌人附近生成随机目标点，避免直接重合导致拥挤/碰撞。
@@ -367,13 +420,36 @@ class LLMClient(object):
             "y": float(y) + radius * math.sin(theta),
         }
 
-    def _call_remote_llm(self, prompt):
-        """预留：调用真实远端 LLM API 并返回原始文本。"""
-        raise NotImplementedError("Remote LLM API is not connected yet")
+    def _normalize_llm_tasks(self, tasks, robot_ids):
+        if not isinstance(tasks, dict):
+            raise ValueError("LLM tasks must be a dict")
 
-    def _parse_llm_json(self, text):
-        """预留：解析远端 LLM 返回的 JSON 文本。"""
-        data = json.loads(text)
-        if not isinstance(data, dict):
-            raise ValueError("LLM response must be a dict")
-        return data
+        result = {}
+        for robot_id in robot_ids:
+            raw = tasks.get(robot_id)
+            if not isinstance(raw, dict):
+                result[robot_id] = self._stop_task("llm missing robot task", timeout=2.0)
+                continue
+
+            action = str(raw.get("action", "STOP")).upper()
+            if action not in ("STOP", "GOTO", "ATTACK", "ROTATE"):
+                action = self._to_text(raw.get("action", "STOP"), "STOP").upper()
+            if action not in ("STOP", "GOTO", "ATTACK"):
+                action = "STOP"
+
+            target = raw.get("target", {"x": 0.0, "y": 0.0})
+            target = self._normalize_patrol_point(target)
+
+            mode = int(self._to_float(raw.get("mode", 0), 0))
+            reason = self._to_text(raw.get("reason", "llm decision"), "llm decision")
+            timeout = self._to_float(raw.get("timeout", 2.0), 2.0)
+            timeout = max(0.5, min(30.0, timeout))
+
+            result[robot_id] = self._build_task(
+                action=action,
+                target=target,
+                mode=mode,
+                reason=reason,
+                timeout=timeout,
+            )
+        return result

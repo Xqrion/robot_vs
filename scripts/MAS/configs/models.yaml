@@ -1,0 +1,63 @@
+llm:
+  provider: openai_compat
+  base_url: "https://api.moonshot.cn/v1"
+  api_key: ""
+  endpoint: "/chat/completions"
+  default_timeout_s: 30.0
+  default_retries: 2
+  default_backoff_s: 0.4
+  max_concurrency: 8
+
+leader_model:
+  name: "kimi-k2.5"
+  temperature: 0.3
+  max_tokens: 512
+  top_p: 0.95
+  timeout_s: 30.0
+  retries: 2
+  backoff_s: 0.5
+
+car_model:
+  name: "kimi-k2-turbo-preview"
+  temperature: 0.2
+  max_tokens: 256
+  top_p: 0.9
+  timeout_s: 30.0
+  retries: 1
+  backoff_s: 0.3
+
+runtime:
+  leader_loop_interval_s: 10.0
+  car_loop_interval_s: 3.0
+  team_ports:
+    red: 8001
+    blue: 8002
+
+legacy_ai:
+  active_model: "kimi-turbo"
+  models:
+    kimi-turbo:
+      base_url: "https://api.moonshot.cn/v1"
+      model_name: "kimi-k2-turbo-preview"
+      timeout_s: 30.0
+    glm-flashX:
+      base_url: "https://open.bigmodel.cn/api/paas/v4"
+      model_name: "glm-4.7-flashX"
+      timeout_s: 30.0
+    doubao:
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      model_name: "doubao-1-5-pro-256k-250115"
+      timeout_s: 30.0
+    deepseek:
+      base_url: "https://api.deepseek.com"
+      model_name: "deepseek-chat"
+      timeout_s: 30.0
+    qwen-flash:
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      model_name: "qwen3.5-flash"
+      timeout_s: 30.0
+  sides:
+    red:
+      active_model: "kimi-turbo"
+    blue:
+      active_model: "kimi-turbo"

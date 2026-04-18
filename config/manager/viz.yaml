@@ -1,0 +1,8 @@
+discover_hz: 2.0
+display_hz: 20.0
+trajectory_lifetime: 0.5
+show_trajectory_line: true
+chassis_enabled: true
+chassis_radius: 0.20
+chassis_height: 0.08
+chassis_z: 0.05

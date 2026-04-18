@@ -13,7 +13,7 @@ bool in_combat
 # 3. 运动学状态 (我在哪)
 geometry_msgs/Pose pose
 geometry_msgs/Twist twist
-
+float32 yaw
 # 4. 任务执行反馈 (★新增：沟通 Manager 的核心)
 uint32 current_task_id      # 我正在执行的、或者刚完成的任务ID
 string current_action       # 我当前在干嘛 (GOTO, STOP, ATTACK)
