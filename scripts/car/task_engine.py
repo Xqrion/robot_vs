@@ -51,7 +51,7 @@ class TaskEngine(object):
                 return  # 相同 task_id 视为重复任务，直接忽略
 
             rospy.loginfo(
-                "[%s] TaskEngine: new task task_id=%d action=%s target=(%.2f, %.2f) yaw=%.2f",
+                "[%s] TaskEngine: new task task_id=%d action=%s target=(%.2f, %.2f, yaw=%.2f) ",
                 self.ns, msg.task_id, msg.action_type, msg.target_x, msg.target_y, msg.target_yaw
             )
 

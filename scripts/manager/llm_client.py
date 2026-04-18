@@ -431,10 +431,8 @@ class LLMClient(object):
                 result[robot_id] = self._stop_task("llm missing robot task", timeout=2.0)
                 continue
 
-            action = str(raw.get("action", "STOP")).upper()
+            action = self._to_text(raw.get("action", "STOP"), "STOP").upper()
             if action not in ("STOP", "GOTO", "ATTACK", "ROTATE"):
-                action = self._to_text(raw.get("action", "STOP"), "STOP").upper()
-            if action not in ("STOP", "GOTO", "ATTACK"):
                 action = "STOP"
 
             target = raw.get("target", {"x": 0.0, "y": 0.0})

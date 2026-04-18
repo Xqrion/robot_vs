@@ -168,12 +168,13 @@ class TaskDispatcher(object):
 				pub.publish(msg)
 
 				rospy.loginfo(
-					"dispatch ns=%s task_id=%d action=%s target=(%.2f, %.2f) reason=%r",
+					"dispatch ns=%s task_id=%d action=%s target=(%.2f, %.2f, yaw=%.2f) reason=%r",
 					ns,
 					msg.task_id,
 					msg.action_type,
 					msg.target_x,
 					msg.target_y,
+					msg.target_yaw,
 					msg.reason,
 				)
 			except Exception as exc:

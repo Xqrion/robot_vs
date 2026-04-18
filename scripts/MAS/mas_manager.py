@@ -624,6 +624,7 @@ def _build_local_state_by_robot(
 			"robot_id": rid,
 			"team_color": side,
 			"state": dict(state_map),
+			"yaw": state_map.get("yaw", 0.0),
 			"hp": state_map.get("hp", 100.0),
 			"ammo": state_map.get("ammo", 10.0),
 			"alive": state_map.get("alive", True),
@@ -637,7 +638,7 @@ def _build_local_state_by_robot(
 def _stop_task(reason: str = "missing robot task") -> Dict[str, Any]:
 	return {
 		"action": "STOP",
-		"target": {"x": 0.0, "y": 0.0},
+		"target": {"x": 0.0, "y": 0.0,"yaw": 0.0},
 		"mode": 0,
 		"reason": str(reason),
 		"timeout": 1.5,

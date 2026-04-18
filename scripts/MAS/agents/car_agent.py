@@ -52,7 +52,7 @@ class CarAgent:
 	  - immediate fallback when LLM call fails.
 	"""
 
-	ALLOWED_ACTIONS = {"STOP", "GOTO", "ATTACK"}
+	ALLOWED_ACTIONS = {"STOP", "GOTO", "ATTACK", "ROTATE"}
 
 	def __init__(
 		self,
@@ -229,6 +229,7 @@ class CarAgent:
 		target = {
 			"x": _as_float(target_raw.get("x", 0.0), 0.0),
 			"y": _as_float(target_raw.get("y", 0.0), 0.0),
+			"yaw": _as_float(target_raw.get("yaw", 0.0), 0.0),
 		}
 
 		mode_default = 0 if action == "STOP" else (2 if action == "ATTACK" else 1)
@@ -293,7 +294,7 @@ class CarAgent:
 	def _stop_task(self, reason: str) -> Dict[str, Any]:
 		return {
 			"action": "STOP",
-			"target": {"x": 0.0, "y": 0.0},
+			"target": {"x": 0.0, "y": 0.0, "yaw": 0.0},
 			"mode": 0,
 			"reason": str(reason),
 			"timeout": 1.5,
@@ -448,6 +449,11 @@ def _normalize_action_alias(action: str) -> str:
 		"IDLE": "STOP",
 		"HOLD": "STOP",
 		"WAIT": "STOP",
+		"TURN": "ROTATE",
+		"ROT": "ROTATE",
+		"LOOK": "ROTATE",
+		"SCAN": "ROTATE",
+		"OBSERVE": "ROTATE",
 	}
 	return alias.get(value, value)
 

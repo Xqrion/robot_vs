@@ -10,8 +10,8 @@ def build_prompt(battle_state, robot_ids):
         "robot_ids": robot_ids,
         "required_output": {
             "<robot_id>": {
-                "action": "STOP | GOTO | ATTACK",
-                "target": {"x": 0.0, "y": 0.0},
+                "action": "STOP | GOTO | ATTACK | ROTATE",
+                "target": {"x": 0.0, "y": 0.0, "yaw": 0.0},
                 "mode": "int",
                 "reason": "short string",
                 "timeout": "float",
