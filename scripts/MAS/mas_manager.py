@@ -619,6 +619,9 @@ def _build_local_state_by_robot(
 		state_map = friendly_entry.get("state", {})
 		if not isinstance(state_map, Mapping):
 			state_map = {}
+		local_visible_enemies = _extract_robot_visible_enemies(state_map)
+		if local_visible_enemies is None:
+			local_visible_enemies = copy.deepcopy(visible_enemies)
 
 		out[rid] = {
 			"robot_id": rid,
@@ -629,10 +632,24 @@ def _build_local_state_by_robot(
 			"ammo": state_map.get("ammo", 10.0),
 			"alive": state_map.get("alive", True),
 			"in_combat": state_map.get("in_combat", False),
-			"visible_enemies": copy.deepcopy(visible_enemies),
+			"visible_enemies": local_visible_enemies,
 			"safe_point": state_map.get("safe_point", {"x": 0.0, "y": 0.0}),
 		}
 	return out
+
+
+def _extract_robot_visible_enemies(robot_state: Mapping[str, Any]) -> Optional[List[Dict[str, Any]]]:
+	local_visible = robot_state.get("visible_enemies")
+	if isinstance(local_visible, list):
+		return [dict(item) for item in local_visible if isinstance(item, Mapping)]
+
+	local_enemies = robot_state.get("enemies")
+	if isinstance(local_enemies, list):
+		return [dict(item) for item in local_enemies if isinstance(item, Mapping) and item.get("visible", True)]
+
+	if "x" in robot_state and "y" in robot_state and robot_state.get("visible", True):
+		return [dict(robot_state)]
+	return None
 
 
 def _stop_task(reason: str = "missing robot task") -> Dict[str, Any]:
@@ -727,4 +744,3 @@ def main() -> None:
 
 if __name__ == "__main__":
 	main()
-

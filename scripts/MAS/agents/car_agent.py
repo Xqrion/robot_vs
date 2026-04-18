@@ -53,6 +53,10 @@ class CarAgent:
 	"""
 
 	ALLOWED_ACTIONS = {"STOP", "GOTO", "ATTACK", "ROTATE"}
+	MAP_X_MIN = -3.8
+	MAP_X_MAX = 3.8
+	MAP_Y_MIN = -1.8
+	MAP_Y_MAX = 1.8
 
 	def __init__(
 		self,
@@ -227,8 +231,8 @@ class CarAgent:
 		if not isinstance(target_raw, Mapping):
 			target_raw = {}
 		target = {
-			"x": _as_float(target_raw.get("x", 0.0), 0.0),
-			"y": _as_float(target_raw.get("y", 0.0), 0.0),
+			"x": _clamp(_as_float(target_raw.get("x", 0.0), 0.0), self.MAP_X_MIN, self.MAP_X_MAX),
+			"y": _clamp(_as_float(target_raw.get("y", 0.0), 0.0), self.MAP_Y_MIN, self.MAP_Y_MAX),
 			"yaw": _as_float(target_raw.get("yaw", 0.0), 0.0),
 		}
 
@@ -367,6 +371,14 @@ def _truncate(text: str, max_chars: int) -> str:
 	if max_chars <= 3:
 		return text[:max_chars]
 	return text[: max_chars - 3] + "..."
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+	if value < low:
+		return float(low)
+	if value > high:
+		return float(high)
+	return float(value)
 
 
 def _extract_enemy_point(source: Mapping[str, Any]) -> Optional[Dict[str, float]]:
