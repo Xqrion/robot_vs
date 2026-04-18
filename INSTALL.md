@@ -13,11 +13,12 @@
 - [5. 安装 VS Code](#5-安装-vs-code)
 - [6. 安装 Git](#6-安装-git)
 - [7. 创建 ROS 工作空间](#7-创建-ros-工作空间)
-- [8. 下载并本地部署 robot_vs 项目](#8-下载并本地部署-robot_vs-项目)
-- [9. 安装 TurtleBot3](#9-安装-turtlebot3)
-- [10. 运行程序](#10-运行程序)
-- [11. 常见问题及解决方法](#11-常见问题及解决方法)
-- [12. 核心命令一键汇总](#12-核心命令一键汇总)
+- [8. 安装 Conda 并配置 Python 环境](#8-安装-conda-并配置-python-环境)
+- [9. 下载并本地部署 robot_vs 项目](#9-下载并本地部署-robot_vs-项目)
+- [10. 安装 TurtleBot3](#10-安装-turtlebot3)
+- [11. 运行程序](#11-运行程序)
+- [12. 常见问题及解决方法](#12-常见问题及解决方法)
+- [13. 核心命令一键汇总](#13-核心命令一键汇总)
 
 ---
 
@@ -169,9 +170,42 @@ source ~/.bashrc
 
 ---
 
-## 8. 下载并本地部署 robot_vs 项目
+## 8. 安装 Conda 并配置 Python 环境
 
-### 8.1 克隆项目
+### 8.1 安装 Miniconda
+
+```bash
+# 下载 Miniconda 安装脚本（Python 3.9 版本）
+wget https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-Linux-x86_64.sh
+
+# 运行安装（按提示同意协议，默认安装路径即可）
+bash Miniconda3-py39_4.12.0-Linux-x86_64.sh
+
+# 重新加载 bash 配置或新开终端
+source ~/.bashrc
+```
+
+### 8.2 创建虚拟环境并安装依赖
+
+```bash
+# 进入项目目录（假设已 clone 到 src 下）
+cd ~/robo2026_ws/src/robot_vs
+
+# 用 conda 创建名为 robotvs 的 Python 3.9 环境
+conda create -n robotvs python=3.9 -y
+
+# 激活环境
+conda activate robotvs
+
+# 安装 requirements.txt 中的依赖
+pip install -r requirements.txt
+```
+
+---
+
+## 9. 下载并本地部署 robot_vs 项目
+
+### 9.1 克隆项目
 
 进入工作空间的 `src` 目录，拉取 GitHub 上的代码：
 
@@ -180,7 +214,7 @@ cd ~/catkin_ws/src
 git clone https://github.com/Xqrion/robot_vs.git
 ```
 
-### 8.2 安装项目依赖
+### 9.2 安装项目依赖
 
 返回工作空间根目录，使用 `rosdep` 自动安装该项目所需的依赖包：
 
@@ -189,7 +223,7 @@ cd ~/catkin_ws
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-### 8.3 编译项目
+### 9.3 编译项目
 
 执行编译并刷新环境变量：
 
@@ -201,7 +235,7 @@ source devel/setup.bash
 
 ---
 
-## 9. 安装 TurtleBot3
+## 10. 安装 TurtleBot3
 
 该项目通常需要依赖 TurtleBot3 的仿真环境，需安装相关功能包：
 
@@ -216,7 +250,7 @@ source ~/.bashrc
 
 ---
 
-## 10. 运行程序
+## 11. 运行程序
 
 运行该项目通常需要打开 **三个不同的终端窗口** 进行配合。
 
@@ -257,7 +291,7 @@ roslaunch robot_vs main.launch
 
 ---
 
-## 11. 常见问题及解决方法
+## 12. 常见问题及解决方法
 
 1. **`catkin_make` 编译失败**
    - 检查报错提示中缺失了什么包，使用 `sudo apt install ros-melodic-<包名>` 手动安装。
@@ -274,7 +308,7 @@ roslaunch robot_vs main.launch
 
 ---
 
-## 12. 核心命令一键汇总
+## 13. 核心命令一键汇总
 
 如果你熟悉流程，可以直接按顺序复制以下代码块执行：
 
