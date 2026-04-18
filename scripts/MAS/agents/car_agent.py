@@ -110,7 +110,11 @@ class CarAgent:
 				side=side,
 			)
 			actions = await asyncio.wait_for(
-				self.llm_client.request_actions(messages=messages, profile=self.fast_profile),
+				self.llm_client.request_actions(
+					messages=messages,
+					profile=self.fast_profile,
+					trace_tag="car:{}".format(self.robot_id),
+				),
 				timeout=max(0.35, self.fast_profile.timeout_s + 0.05),
 			)
 			task = self._pick_and_normalize_task(actions)
@@ -214,7 +218,8 @@ class CarAgent:
 		return self._normalize_task(selected)
 
 	def _normalize_task(self, raw: Mapping[str, Any]) -> Dict[str, Any]:
-		action = str(raw.get("action", "STOP")).strip().upper()
+		action = str(raw.get("action", raw.get("cmd", raw.get("type", "STOP")))).strip().upper()
+		action = _normalize_action_alias(action)
 		if action not in self.ALLOWED_ACTIONS:
 			action = "STOP"
 
@@ -423,6 +428,28 @@ def _extract_safe_point(local_state: Mapping[str, Any]) -> Dict[str, float]:
 				"y": _as_float(point.get("y", 0.0), 0.0),
 			}
 	return {"x": 0.0, "y": 0.0}
+
+
+def _normalize_action_alias(action: str) -> str:
+	value = str(action or "").strip().upper()
+	if not value:
+		return "STOP"
+
+	alias = {
+		"MOVE": "GOTO",
+		"GO": "GOTO",
+		"GO_TO": "GOTO",
+		"NAV": "GOTO",
+		"NAVIGATE": "GOTO",
+		"PATROL": "GOTO",
+		"FIRE": "ATTACK",
+		"SHOOT": "ATTACK",
+		"ENGAGE": "ATTACK",
+		"IDLE": "STOP",
+		"HOLD": "STOP",
+		"WAIT": "STOP",
+	}
+	return alias.get(value, value)
 
 
 __all__ = [

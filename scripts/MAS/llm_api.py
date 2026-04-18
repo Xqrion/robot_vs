@@ -170,7 +170,7 @@ def parse_action_list(raw_output: Any) -> List[Dict[str, Any]]:
 	"""Parse model output into canonical action list format.
 
 	Canonical item shape:
-	  {"robot_id": str, "action": str, "target": Any, ...optional fields...}
+	  {"robot_id": str(optional for single-robot), "action": str, "target": Any, ...optional fields...}
 	"""
 	parsed = raw_output
 	if isinstance(raw_output, str):
@@ -185,9 +185,20 @@ def parse_action_list(raw_output: Any) -> List[Dict[str, Any]]:
 			if isinstance(candidate, list):
 				action_items = candidate
 				break
+			if key in ("result", "data") and isinstance(candidate, Mapping):
+				# Support {"result": {"robot_x": {...}}} style payloads.
+				action_items = _expand_robot_keyed_mapping(candidate)
+				break
 		else:
-			if "robot_id" in parsed and "action" in parsed:
+			if "tasks" in parsed and isinstance(parsed.get("tasks"), Mapping):
+				action_items = _expand_robot_keyed_mapping(parsed.get("tasks", {}))
+			elif "robot_id" in parsed and ("action" in parsed or "cmd" in parsed or "type" in parsed):
 				action_items = [parsed]
+			elif ("action" in parsed or "cmd" in parsed or "type" in parsed) and "target" in parsed:
+				# Single-robot outputs often omit robot_id.
+				action_items = [parsed]
+			elif _looks_like_robot_keyed_mapping(parsed):
+				action_items = _expand_robot_keyed_mapping(parsed)
 			else:
 				raise LLMResponseFormatError("JSON object must include list field like 'actions'")
 	else:
@@ -198,15 +209,14 @@ def parse_action_list(raw_output: Any) -> List[Dict[str, Any]]:
 		if not isinstance(item, Mapping):
 			continue
 
-		robot_id = str(item.get("robot_id", item.get("robot", ""))).strip()
-		action = str(item.get("action", item.get("cmd", ""))).strip()
-		if not robot_id or not action:
+		robot_id = str(item.get("robot_id", item.get("robot", item.get("car", item.get("ns", item.get("id", "")))))).strip()
+		action = str(item.get("action", item.get("cmd", item.get("type", "")))).strip()
+		if not action:
 			continue
 
-		action_dict: Dict[str, Any] = {
-			"robot_id": robot_id,
-			"action": action,
-		}
+		action_dict: Dict[str, Any] = {"action": action}
+		if robot_id:
+			action_dict["robot_id"] = robot_id
 
 		if "target" in item:
 			action_dict["target"] = item.get("target")
@@ -224,6 +234,37 @@ def parse_action_list(raw_output: Any) -> List[Dict[str, Any]]:
 	if not normalized:
 		raise LLMResponseFormatError("No valid action entries were found")
 	return normalized
+
+
+def _looks_like_robot_keyed_mapping(mapping: Mapping[str, Any]) -> bool:
+	if not isinstance(mapping, Mapping):
+		return False
+	if not mapping:
+		return False
+
+	for key, value in mapping.items():
+		if not isinstance(key, str):
+			return False
+		if not isinstance(value, Mapping):
+			return False
+		if not any(field in value for field in ("action", "cmd", "type")):
+			return False
+	return True
+
+
+def _expand_robot_keyed_mapping(mapping: Mapping[str, Any]) -> List[Dict[str, Any]]:
+	items: List[Dict[str, Any]] = []
+	if not isinstance(mapping, Mapping):
+		return items
+
+	for robot_id, payload in mapping.items():
+		if not isinstance(payload, Mapping):
+			continue
+		obj = dict(payload)
+		if "robot_id" not in obj and isinstance(robot_id, str):
+			obj["robot_id"] = robot_id
+		items.append(obj)
+	return items
 
 
 def _extract_message_text(content: Any) -> str:
@@ -337,10 +378,13 @@ class AsyncLLMClient:
 		profile: LLMRequestProfile,
 		response_format: Optional[Mapping[str, Any]] = None,
 		extra_body: Optional[Mapping[str, Any]] = None,
+		trace_tag: str = "",
 	) -> str:
 		payload = self._build_payload(messages, profile, response_format=response_format, extra_body=extra_body)
 		raw = await self._request_json(payload, profile)
-		return extract_text_from_response(raw)
+		text = extract_text_from_response(raw)
+		logger.info("LLM_OUTPUT tag=%s model=%s text=%s", trace_tag or "-", profile.model, text)
+		return text
 
 	async def request_actions(
 		self,
@@ -348,12 +392,14 @@ class AsyncLLMClient:
 		profile: LLMRequestProfile,
 		response_format: Optional[Mapping[str, Any]] = None,
 		extra_body: Optional[Mapping[str, Any]] = None,
+		trace_tag: str = "",
 	) -> List[Dict[str, Any]]:
 		text = await self.request_text(
 			messages=messages,
 			profile=profile,
 			response_format=response_format,
 			extra_body=extra_body,
+			trace_tag=trace_tag,
 		)
 		return parse_action_list(text)
 

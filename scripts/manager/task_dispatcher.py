@@ -5,6 +5,14 @@ import rospy
 from robot_vs.msg import TaskCommand
 
 
+try:
+	text_type = unicode  # type: ignore[name-defined]
+	binary_type = str
+except NameError:
+	text_type = str
+	binary_type = bytes
+
+
 class TaskDispatcher(object):
 	"""将团队任务发布到 /<ns>/task_cmd 话题。"""
 
@@ -52,13 +60,13 @@ class TaskDispatcher(object):
 				if not ns:
 					continue
 				normalized[ns] = {
-					"action": str(item.get("type", "STOP")).upper(),
+					"action": self._to_text(item.get("type", "STOP"), "STOP").upper(),
 					"target": {
 						"x": float(item.get("target_x", 0.0)),
 						"y": float(item.get("target_y", 0.0)),
 					},
 					"mode": int(item.get("mode", 0)),
-					"reason": item.get("reason", "legacy format"),
+					"reason": self._to_text(item.get("reason", "legacy format"), "legacy format"),
 					"timeout": float(item.get("timeout", self.default_timeout)),
 				}
 			return normalized
@@ -79,7 +87,7 @@ class TaskDispatcher(object):
 		}
 
 	def _task_signature(self, task):
-		action = str(task.get("action", "STOP"))
+		action = self._to_text(task.get("action", "STOP"), "STOP")
 		target = task.get("target", {})
 		if not isinstance(target, dict):
 			target = {}
@@ -90,6 +98,22 @@ class TaskDispatcher(object):
 		timeout = float(task.get("timeout", self.default_timeout))
 
 		return (action, target_x, target_y, mode, timeout)
+
+	def _to_text(self, value, default=u""):
+		if value is None:
+			value = default
+
+		try:
+			if isinstance(value, text_type):
+				return value
+			if isinstance(value, binary_type):
+				return value.decode("utf-8", "replace")
+			return text_type(value)
+		except Exception:
+			try:
+				return text_type(default)
+			except Exception:
+				return u""
 
 	def _assign_task_id(self, ns, task):
 		signature = self._task_signature(task)
@@ -109,7 +133,7 @@ class TaskDispatcher(object):
 	def _build_task_msg(self, ns, task):
 		msg = TaskCommand()
 		msg.task_id = int(self._assign_task_id(ns, task))
-		msg.action_type = str(task.get("action", "STOP"))
+		msg.action_type = self._to_text(task.get("action", "STOP"), "STOP")
 
 		target = task.get("target", {})
 		if not isinstance(target, dict):
@@ -118,7 +142,7 @@ class TaskDispatcher(object):
 		msg.target_y = float(target.get("y", 0.0))
 
 		msg.mode = int(task.get("mode", 0))
-		msg.reason = str(task.get("reason", ""))
+		msg.reason = self._to_text(task.get("reason", ""), "")
 		msg.timeout = float(task.get("timeout", self.default_timeout))
 		return msg
 
@@ -141,7 +165,7 @@ class TaskDispatcher(object):
 				pub.publish(msg)
 
 				rospy.loginfo(
-					"dispatch ns=%s task_id=%d action=%s target=(%.2f, %.2f) reason=%s",
+					"dispatch ns=%s task_id=%d action=%s target=(%.2f, %.2f) reason=%r",
 					ns,
 					msg.task_id,
 					msg.action_type,

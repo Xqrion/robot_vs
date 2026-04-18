@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import copy
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -314,18 +315,37 @@ class HierarchicalMASManager:
 		if not self.enabled_sides:
 			raise ValueError("enabled_sides must include red and/or blue")
 
-		self.llm_client = AsyncLLMClient.from_models_config(self.models_cfg)
-
 		base_ltm_dir = Path(ltm_dir) if ltm_dir is not None else (Path(__file__).resolve().parent / "memory" / "data")
+		self._llm_clients: Dict[str, AsyncLLMClient] = {}
 		self._runtimes: Dict[str, SideMASRuntime] = {}
 		for side in self.enabled_sides:
+			side_models_cfg = _resolve_side_models_cfg(self.models_cfg, side)
+			side_llm_cfg = side_models_cfg.get("llm", {})
+			if not isinstance(side_llm_cfg, Mapping):
+				side_llm_cfg = {}
+
+			llm_client = AsyncLLMClient.from_models_config(side_models_cfg)
+			self._llm_clients[side] = llm_client
+
 			side_path = base_ltm_dir / "ltm_{}.jsonl".format(side)
 			self._runtimes[side] = SideMASRuntime(
 				side=side,
-				llm_client=self.llm_client,
-				models_cfg=self.models_cfg,
+				llm_client=llm_client,
+				models_cfg=side_models_cfg,
 				prompts_cfg=self.prompts_cfg,
 				ltm_storage_path=side_path,
+			)
+
+			leader_cfg = side_models_cfg.get("leader_model", {})
+			leader_model_name = ""
+			if isinstance(leader_cfg, Mapping):
+				leader_model_name = str(leader_cfg.get("name", ""))
+			LOGGER.info(
+				"Side config resolved: side=%s model=%s base_url=%s api_key_source=%s",
+				side,
+				leader_model_name,
+				side_llm_cfg.get("base_url", ""),
+				side_llm_cfg.get("api_key_source", "unknown"),
 			)
 
 		self._started = False
@@ -362,7 +382,19 @@ class HierarchicalMASManager:
 				return
 			for runtime in self._runtimes.values():
 				await runtime.stop()
-			await self.llm_client.close()
+
+			closed_client_ids = set()
+			for side in list(self._llm_clients.keys()):
+				client = self._llm_clients.get(side)
+				if client is None:
+					continue
+				client_id = id(client)
+				if client_id in closed_client_ids:
+					continue
+				await client.close()
+				closed_client_ids.add(client_id)
+			self._llm_clients = {}
+
 			self._started = False
 			LOGGER.info("HierarchicalMASManager stopped")
 
@@ -405,6 +437,88 @@ def _as_float(value: Any, default: float) -> float:
 		return float(value)
 	except (TypeError, ValueError):
 		return float(default)
+
+
+def _resolve_api_key_for_side(side: str, default_api_key: Any) -> Tuple[str, str]:
+	side_key_name = "LLM_API_KEY_{}".format(side.upper())
+	side_key = os.getenv(side_key_name, "")
+	if side_key:
+		return side_key, side_key_name
+
+	shared_key = os.getenv("LLM_API_KEY", "")
+	if shared_key:
+		return shared_key, "LLM_API_KEY"
+
+	legacy_key = os.getenv("LLM_API", "")
+	if legacy_key:
+		return legacy_key, "LLM_API"
+
+	sitp_key = os.getenv("SITP_LLM_API_KEY", "")
+	if sitp_key:
+		return sitp_key, "SITP_LLM_API_KEY"
+
+	config_key = str(default_api_key or "")
+	if config_key:
+		return config_key, "config"
+
+	return "", "MISSING"
+
+
+def _resolve_side_models_cfg(models_cfg: Mapping[str, Any], side: str) -> Dict[str, Any]:
+	resolved = copy.deepcopy(dict(models_cfg))
+
+	llm_cfg = resolved.get("llm", {})
+	if not isinstance(llm_cfg, Mapping):
+		llm_cfg = {}
+	llm_cfg = dict(llm_cfg)
+
+	legacy_ai = resolved.get("legacy_ai", {})
+	active_model_name = ""
+	if isinstance(legacy_ai, Mapping):
+		active_model_name = str(legacy_ai.get("active_model", "")).strip()
+
+		sides_cfg = legacy_ai.get("sides", {})
+		if isinstance(sides_cfg, Mapping):
+			side_cfg = sides_cfg.get(side, {})
+			if isinstance(side_cfg, Mapping):
+				side_active = str(side_cfg.get("active_model", "")).strip()
+				if side_active:
+					active_model_name = side_active
+
+		model_pool = legacy_ai.get("models", {})
+		if isinstance(model_pool, Mapping) and active_model_name:
+			legacy_model_cfg = model_pool.get(active_model_name, {})
+			if isinstance(legacy_model_cfg, Mapping):
+				base_url = str(legacy_model_cfg.get("base_url", "")).strip()
+				model_name = str(legacy_model_cfg.get("model_name", "")).strip()
+				timeout_s = _as_float(
+					legacy_model_cfg.get("timeout_s", llm_cfg.get("default_timeout_s", 8.0)),
+					_as_float(llm_cfg.get("default_timeout_s", 8.0), 8.0),
+				)
+
+				if base_url:
+					llm_cfg["base_url"] = base_url
+				llm_cfg["default_timeout_s"] = timeout_s
+
+				if model_name:
+					for role_key in ("leader_model", "car_model"):
+						role_cfg = resolved.get(role_key, {})
+						if not isinstance(role_cfg, Mapping):
+							role_cfg = {}
+						role_cfg = dict(role_cfg)
+						role_cfg["name"] = model_name
+						role_cfg["timeout_s"] = timeout_s
+						resolved[role_key] = role_cfg
+
+	if active_model_name:
+		resolved["resolved_active_model"] = active_model_name
+
+	api_key, key_source = _resolve_api_key_for_side(side=side, default_api_key=llm_cfg.get("api_key", ""))
+	llm_cfg["api_key"] = api_key
+	llm_cfg["api_key_source"] = key_source
+
+	resolved["llm"] = llm_cfg
+	return resolved
 
 
 def _extract_battle_state(payload: Mapping[str, Any]) -> Dict[str, Any]:

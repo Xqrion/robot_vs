@@ -298,10 +298,10 @@ def plan(payload=Body(default=None)):
     if not normalized_side:
         normalized_side = default_side
 
-    # print("[llm_manager] normalized request: robot_ids={}, battle_state_keys={}".format(
-    #     robot_ids,
-    #     list(battle_state.keys()) if isinstance(battle_state, dict) else [],
-    # ))
+    print("[llm_manager] normalized request: robot_ids={}, battle_state_keys={}".format(
+        robot_ids,
+        list(battle_state.keys()) if isinstance(battle_state, dict) else [],
+    ))
 
     try:
         manager = _get_manager(normalized_side)

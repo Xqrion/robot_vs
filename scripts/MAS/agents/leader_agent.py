@@ -118,13 +118,18 @@ class LeaderAgent:
 					stm_summary=stm_summary,
 					ltm_summary=ltm_summary,
 				)
-				raw_text = await self.llm_client.request_text(messages=messages, profile=self.profile)
+				raw_text = await self.llm_client.request_text(
+					messages=messages,
+					profile=self.profile,
+					trace_tag="leader:{}".format(normalized_side or "unknown"),
+				)
 			except (LLMAPIError, LLMResponseFormatError, ValueError) as exc:
 				LOGGER.warning("LeaderAgent LLM plan failed, using fallback strategy: %s", exc)
 				raw_text = self._fallback_strategy_text(safe_state, stm_summary)
 				used_fallback = True
 
 			normalized_text = self._normalize_order_text(raw_text)
+			LOGGER.info("LeaderAgent(side=%s) order=%s", normalized_side or "unknown", normalized_text)
 			plan = LeaderPlan(
 				order_text=normalized_text,
 				generated_at_s=now_s,
