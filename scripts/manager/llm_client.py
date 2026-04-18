@@ -433,7 +433,7 @@ class LLMClient(object):
 
             action = str(raw.get("action", "STOP")).upper()
             if action not in ("STOP", "GOTO", "ATTACK", "ROTATE"):
-            action = self._to_text(raw.get("action", "STOP"), "STOP").upper()
+                action = self._to_text(raw.get("action", "STOP"), "STOP").upper()
             if action not in ("STOP", "GOTO", "ATTACK"):
                 action = "STOP"
 
