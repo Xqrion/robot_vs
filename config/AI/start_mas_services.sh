@@ -36,6 +36,22 @@ RED_PORT="${MAS_RED_PORT:-${LLM_RED_PORT:-8001}}"
 BLUE_PORT="${MAS_BLUE_PORT:-${LLM_BLUE_PORT:-8002}}"
 LOG_LEVEL="${MAS_LOG_LEVEL:-info}"
 
+# <<< switch to debug <<<
+# Prompt trace settings:
+# - MAS_LOG_PROMPTS: 1 to enable prompt trace logging (default on for debugging)
+# - MAS_PROMPT_LOG_FILE: output file for formatted prompt/response trace
+# - MAS_PROMPT_LOG_CONSOLE: 1 to also print full trace in terminal (default off)
+export MAS_LOG_PROMPTS="${MAS_LOG_PROMPTS:-1}"
+export MAS_PROMPT_LOG_FILE="${MAS_PROMPT_LOG_FILE:-$SCRIPT_DIR/../../debug/mas_llm_trace.log}"
+export MAS_PROMPT_LOG_CONSOLE="${MAS_PROMPT_LOG_CONSOLE:-0}"
+
+# Keep prompts_2 as current default, but allow override from environment.
+export MAS_PROMPTS_FILE="${MAS_PROMPTS_FILE:-prompts_2.yaml}"
+
+if [ "$MAS_LOG_PROMPTS" = "1" ]; then
+    mkdir -p "$(dirname "$MAS_PROMPT_LOG_FILE")"
+fi
+
 if [ ! -f "$PYTHON_SCRIPT" ]; then
     echo "[start_mas_services] MAS server script not found: $PYTHON_SCRIPT"
     exit 1
@@ -88,6 +104,8 @@ echo "Starting MAS dual-port service..."
 echo "Conda Env: $CONDA_ENV"
 echo "Host: $HOST"
 echo "Ports: red=$RED_PORT blue=$BLUE_PORT"
+echo "Prompts File: ${MAS_PROMPTS_FILE}"
+echo "Prompt Trace: enabled=${MAS_LOG_PROMPTS} console=${MAS_PROMPT_LOG_CONSOLE} file=${MAS_PROMPT_LOG_FILE}"
 echo "Configs Root: $CONFIGS_ROOT"
 
 python "$PYTHON_SCRIPT" \

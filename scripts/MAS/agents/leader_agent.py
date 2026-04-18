@@ -129,7 +129,9 @@ class LeaderAgent:
 				used_fallback = True
 
 			normalized_text = self._normalize_order_text(raw_text)
-			LOGGER.info("LeaderAgent(side=%s) order=%s", normalized_side or "unknown", normalized_text)
+
+			# LOGGER.info("LeaderAgent(side=%s) order=%s", normalized_side or "unknown", normalized_text)
+			
 			plan = LeaderPlan(
 				order_text=normalized_text,
 				generated_at_s=now_s,

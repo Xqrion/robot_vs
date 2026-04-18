@@ -11,8 +11,11 @@ Design goals:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
+import os
+from pathlib import Path
 import random
 import re
 from dataclasses import dataclass
@@ -65,6 +68,33 @@ def _as_int(value: Any, field_name: str) -> int:
 		return int(value)
 	except (TypeError, ValueError):
 		raise ValueError("{} must be int-like, got {}".format(field_name, value))
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+	if isinstance(value, bool):
+		return value
+	if value is None:
+		return bool(default)
+
+	text = str(value).strip().lower()
+	if text in ("1", "true", "yes", "y", "on"):
+		return True
+	if text in ("0", "false", "no", "n", "off"):
+		return False
+	return bool(default)
+
+
+def _utc_now_iso() -> str:
+	return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _single_line_preview(text: Any, max_chars: int = 220) -> str:
+	one_line = " ".join(str(text or "").split())
+	if len(one_line) <= max_chars:
+		return one_line
+	if max_chars <= 3:
+		return one_line[:max_chars]
+	return one_line[: max_chars - 3] + "..."
 
 
 def build_profile_from_models(models_cfg: Mapping[str, Any], section_name: str) -> LLMRequestProfile:
@@ -326,6 +356,9 @@ class AsyncLLMClient:
 		max_concurrency: int = 8,
 		transport_timeout_s: float = 30.0,
 		extra_headers: Optional[Mapping[str, str]] = None,
+		log_prompts: bool = False,
+		prompt_log_file: str = "",
+		prompt_log_console: bool = False,
 	) -> None:
 		base = str(base_url).strip()
 		if not base:
@@ -334,6 +367,10 @@ class AsyncLLMClient:
 		self.base_url = base.rstrip("/")
 		self.endpoint = endpoint if endpoint.startswith("/") else "/" + endpoint
 		self.provider = str(provider).strip() or "openai_compat"
+		self.log_prompts = bool(log_prompts)
+		self.prompt_log_file = str(prompt_log_file or "").strip()
+		self.prompt_log_console = bool(prompt_log_console)
+		self._trace_file_lock = asyncio.Lock()
 
 		concurrency = max(1, int(max_concurrency))
 		self._semaphore = asyncio.Semaphore(concurrency)
@@ -351,8 +388,30 @@ class AsyncLLMClient:
 		if not isinstance(models_cfg, Mapping):
 			raise ValueError("models_cfg must be a mapping")
 		llm_cfg = models_cfg.get("llm", {})
+		runtime_cfg = models_cfg.get("runtime", {})
 		if not isinstance(llm_cfg, Mapping):
 			llm_cfg = {}
+		if not isinstance(runtime_cfg, Mapping):
+			runtime_cfg = {}
+
+		log_prompts = _as_bool(runtime_cfg.get("log_prompts", False), default=False)
+		prompt_log_console = _as_bool(runtime_cfg.get("prompt_log_console", False), default=False)
+		prompt_log_file = str(runtime_cfg.get("prompt_log_file", "")).strip()
+
+		env_log_prompts = os.getenv("MAS_LOG_PROMPTS")
+		if env_log_prompts is not None and str(env_log_prompts).strip() != "":
+			log_prompts = _as_bool(env_log_prompts, default=log_prompts)
+
+		env_prompt_log_console = os.getenv("MAS_PROMPT_LOG_CONSOLE")
+		if env_prompt_log_console is not None and str(env_prompt_log_console).strip() != "":
+			prompt_log_console = _as_bool(env_prompt_log_console, default=prompt_log_console)
+
+		env_prompt_log_file = os.getenv("MAS_PROMPT_LOG_FILE")
+		if env_prompt_log_file is not None and str(env_prompt_log_file).strip() != "":
+			prompt_log_file = str(env_prompt_log_file).strip()
+
+		if log_prompts and not prompt_log_file:
+			prompt_log_file = str(Path(__file__).resolve().parent / "logs" / "llm_prompt_trace.log")
 
 		return cls(
 			base_url=str(llm_cfg.get("base_url", "")).strip(),
@@ -361,6 +420,9 @@ class AsyncLLMClient:
 			provider=str(llm_cfg.get("provider", "openai_compat")).strip() or "openai_compat",
 			max_concurrency=max(1, _as_int(llm_cfg.get("max_concurrency", 8), "llm.max_concurrency")),
 			transport_timeout_s=max(1.0, _as_float(llm_cfg.get("default_timeout_s", 8.0), "llm.default_timeout_s") * 3.0),
+			log_prompts=log_prompts,
+			prompt_log_file=prompt_log_file,
+			prompt_log_console=prompt_log_console,
 		)
 
 	async def close(self) -> None:
@@ -383,8 +445,95 @@ class AsyncLLMClient:
 		payload = self._build_payload(messages, profile, response_format=response_format, extra_body=extra_body)
 		raw = await self._request_json(payload, profile)
 		text = extract_text_from_response(raw)
-		logger.info("LLM_OUTPUT tag=%s model=%s text=%s", trace_tag or "-", profile.model, text)
+
+		if self.log_prompts:
+			trace_block = self._format_trace_block(
+				messages=messages,
+				response_text=text,
+				trace_tag=trace_tag,
+				model=profile.model,
+			)
+			await self._emit_trace_block(trace_block=trace_block, trace_tag=trace_tag, model=profile.model)
+
+		if self.log_prompts and self.prompt_log_file and (not self.prompt_log_console):
+			logger.debug(
+				"LLM_OUTPUT tag=%s model=%s preview=%s",
+				trace_tag or "-",
+				profile.model,
+				_single_line_preview(text),
+			)
+		else:
+			logger.info(
+				"LLM_OUTPUT tag=%s model=%s preview=%s",
+				trace_tag or "-",
+				profile.model,
+				_single_line_preview(text),
+			)
 		return text
+
+	def _format_trace_block(
+		self,
+		messages: Sequence[Mapping[str, Any]],
+		response_text: str,
+		trace_tag: str,
+		model: str,
+	) -> str:
+		lines: List[str] = []
+		lines.append("=" * 96)
+		lines.append("LLM_TRACE ts={} tag={} model={}".format(_utc_now_iso(), trace_tag or "-", model))
+		lines.append("message_count={}".format(len(messages)))
+
+		for idx, message in enumerate(messages):
+			role = str(message.get("role", "")) if isinstance(message, Mapping) else ""
+			content = message.get("content", "") if isinstance(message, Mapping) else ""
+
+			if isinstance(content, str):
+				content_text = content
+			else:
+				content_text = json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True)
+
+			lines.append("--- message[{}] role={} ---".format(idx, role))
+			lines.append(content_text.rstrip())
+
+		lines.append("--- response_text ---")
+		lines.append(str(response_text or "").rstrip())
+		lines.append("=" * 96)
+		lines.append("")
+		return "\n".join(lines)
+
+	async def _emit_trace_block(self, trace_block: str, trace_tag: str, model: str) -> None:
+		if self.prompt_log_file:
+			await self._append_trace_file(trace_block)
+			logger.debug(
+				"LLM_TRACE_WRITTEN tag=%s model=%s file=%s",
+				trace_tag or "-",
+				model,
+				self.prompt_log_file,
+			)
+			return
+
+		if self.prompt_log_console:
+			logger.info("LLM_TRACE tag=%s model=%s\n%s", trace_tag or "-", model, trace_block)
+			return
+
+		logger.info("LLM_TRACE tag=%s model=%s (enabled, but no output target configured)", trace_tag or "-", model)
+
+	async def _append_trace_file(self, trace_block: str) -> None:
+		if not self.prompt_log_file:
+			return
+
+		async with self._trace_file_lock:
+			await asyncio.to_thread(self._append_trace_file_sync, self.prompt_log_file, trace_block)
+
+	@staticmethod
+	def _append_trace_file_sync(path_text: str, trace_block: str) -> None:
+		path = Path(path_text).expanduser()
+		if not path.is_absolute():
+			path = Path.cwd() / path
+
+		path.parent.mkdir(parents=True, exist_ok=True)
+		with path.open("a", encoding="utf-8") as f:
+			f.write(trace_block)
 
 	async def request_actions(
 		self,
