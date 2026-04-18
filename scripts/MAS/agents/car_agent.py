@@ -53,10 +53,10 @@ class CarAgent:
 	"""
 
 	ALLOWED_ACTIONS = {"STOP", "GOTO", "ATTACK", "ROTATE"}
-	MAP_X_MIN = -3.8
-	MAP_X_MAX = 3.8
-	MAP_Y_MIN = -1.8
-	MAP_Y_MAX = 1.8
+	DEFAULT_MAP_X_MIN = -3.8
+	DEFAULT_MAP_X_MAX = 3.8
+	DEFAULT_MAP_Y_MIN = -1.8
+	DEFAULT_MAP_Y_MAX = 1.8
 
 	def __init__(
 		self,
@@ -75,6 +75,7 @@ class CarAgent:
 		self.llm_client = llm_client
 		self.models_cfg = dict(models_cfg)
 		self.prompts_cfg = dict(prompts_cfg)
+		self.map_bounds = _resolve_map_bounds(self.models_cfg)
 
 		base_profile = build_profile_from_models(self.models_cfg, "car_model")
 		target_timeout = max(0.3, _as_float(fast_timeout_s, base_profile.timeout_s) if fast_timeout_s is not None else base_profile.timeout_s)
@@ -231,8 +232,16 @@ class CarAgent:
 		if not isinstance(target_raw, Mapping):
 			target_raw = {}
 		target = {
-			"x": _clamp(_as_float(target_raw.get("x", 0.0), 0.0), self.MAP_X_MIN, self.MAP_X_MAX),
-			"y": _clamp(_as_float(target_raw.get("y", 0.0), 0.0), self.MAP_Y_MIN, self.MAP_Y_MAX),
+			"x": _clamp(
+				_as_float(target_raw.get("x", 0.0), 0.0),
+				self.map_bounds["x_min"],
+				self.map_bounds["x_max"],
+			),
+			"y": _clamp(
+				_as_float(target_raw.get("y", 0.0), 0.0),
+				self.map_bounds["y_min"],
+				self.map_bounds["y_max"],
+			),
 			"yaw": _as_float(target_raw.get("yaw", 0.0), 0.0),
 		}
 
@@ -374,11 +383,39 @@ def _truncate(text: str, max_chars: int) -> str:
 
 
 def _clamp(value: float, low: float, high: float) -> float:
-	if value < low:
-		return float(low)
-	if value > high:
-		return float(high)
-	return float(value)
+	return max(low, min(value, high))
+
+
+def _resolve_map_bounds(models_cfg: Mapping[str, Any]) -> Dict[str, float]:
+	default_bounds = {
+		"x_min": CarAgent.DEFAULT_MAP_X_MIN,
+		"x_max": CarAgent.DEFAULT_MAP_X_MAX,
+		"y_min": CarAgent.DEFAULT_MAP_Y_MIN,
+		"y_max": CarAgent.DEFAULT_MAP_Y_MAX,
+	}
+	runtime_cfg = models_cfg.get("runtime", {})
+	if not isinstance(runtime_cfg, Mapping):
+		return default_bounds
+	map_bounds = runtime_cfg.get("map_bounds", {})
+	if not isinstance(map_bounds, Mapping):
+		return default_bounds
+
+	x_min = _as_float(map_bounds.get("x_min", default_bounds["x_min"]), default_bounds["x_min"])
+	x_max = _as_float(map_bounds.get("x_max", default_bounds["x_max"]), default_bounds["x_max"])
+	y_min = _as_float(map_bounds.get("y_min", default_bounds["y_min"]), default_bounds["y_min"])
+	y_max = _as_float(map_bounds.get("y_max", default_bounds["y_max"]), default_bounds["y_max"])
+
+	if x_min > x_max:
+		raise ValueError(f"runtime.map_bounds has invalid x range: x_min({x_min}) > x_max({x_max})")
+	if y_min > y_max:
+		raise ValueError(f"runtime.map_bounds has invalid y range: y_min({y_min}) > y_max({y_max})")
+
+	return {
+		"x_min": x_min,
+		"x_max": x_max,
+		"y_min": y_min,
+		"y_max": y_max,
+	}
 
 
 def _extract_enemy_point(source: Mapping[str, Any]) -> Optional[Dict[str, float]]:

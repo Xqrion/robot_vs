@@ -641,15 +641,30 @@ def _build_local_state_by_robot(
 def _extract_robot_visible_enemies(robot_state: Mapping[str, Any]) -> Optional[List[Dict[str, Any]]]:
 	local_visible = robot_state.get("visible_enemies")
 	if isinstance(local_visible, list):
-		return [dict(item) for item in local_visible if isinstance(item, Mapping)]
+		valid = [_mapping_to_dict(item) for item in local_visible if isinstance(item, Mapping)]
+		if len(valid) != len(local_visible):
+			LOGGER.warning("Ignored %d invalid visible_enemies items in robot local state", len(local_visible) - len(valid))
+		return valid
 
 	local_enemies = robot_state.get("enemies")
 	if isinstance(local_enemies, list):
-		return [dict(item) for item in local_enemies if isinstance(item, Mapping) and item.get("visible", True)]
+		valid = [
+			_mapping_to_dict(item)
+			for item in local_enemies
+			if isinstance(item, Mapping) and item.get("visible", True)
+		]
+		invalid_count = sum(1 for item in local_enemies if not isinstance(item, Mapping))
+		if invalid_count > 0:
+			LOGGER.warning("Ignored %d invalid enemies items in robot local state", invalid_count)
+		return valid
 
-	if "x" in robot_state and "y" in robot_state and robot_state.get("visible", True):
-		return [dict(robot_state)]
 	return None
+
+
+def _mapping_to_dict(item: Mapping[str, Any]) -> Dict[str, Any]:
+	if isinstance(item, dict):
+		return item.copy()
+	return dict(item)
 
 
 def _stop_task(reason: str = "missing robot task") -> Dict[str, Any]:
