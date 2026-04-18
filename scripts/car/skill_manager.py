@@ -68,12 +68,6 @@ class SkillManager(object):
             Twist,
             queue_size=1,
         )
-                # 取消 move_base 当前 goal（死亡时用）
-        self._nav_cancel_pub = rospy.Publisher(
-            "/{}/move_base/cancel".format(self.ns),
-            GoalID,
-            queue_size=1,
-        )
 
         # 死亡锁存：保证“死亡处理”只触发一次
         self._dead_latched = False
@@ -128,7 +122,7 @@ class SkillManager(object):
     def publish_nav_cancel(self):
         """取消 move_base 的所有目标。"""
         try:
-            self._nav_cancel_pub.publish(GoalID())  # 空 GoalID = cancel all
+            self._cancel_pub.publish(GoalID())  # 空 GoalID = cancel all
         except Exception as exc:
             rospy.logwarn("[%s] publish_nav_cancel failed: %s", self.ns, exc)
 
@@ -170,7 +164,8 @@ class SkillManager(object):
         # 5) 启动“死亡持续 stop”定时器（只启动一次）
         if self._dead_stop_timer is None:
             period = 1.0 / max(1.0, float(self._dead_stop_hz))
-            self._dead_stop_timer = rospy.Timer(rospy.Duration(period), self._dead_stop_tick)  
+            self._dead_stop_timer = rospy.Timer(rospy.Duration(period), self._dead_stop_tick)
+
     def publish_nav_goal(self, goal):
         """向 move_base_simple 发布 PoseStamped 目标。死亡后禁止导航。"""
         with self._lock:
@@ -192,8 +187,8 @@ class SkillManager(object):
         self._cmd_vel_pub.publish(cmd_vel)
 
     def cancel_nav_goal(self):
-        """取消当前 move_base 目标，进入空闲状态。"""
-        self._cancel_pub.publish(GoalID())
+        """取消当前 move_base 目标，并重置本地导航状态。"""
+        self.publish_nav_cancel()
         self.reset_nav_status()
 
     def publish_fire_event(self, x, y, yaw):

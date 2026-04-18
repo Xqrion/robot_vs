@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import json
 import os
 
@@ -24,9 +21,12 @@ def build_prompt(battle_state, robot_ids):
             "只输出 JSON 对象",
             "必须覆盖 robot_ids 里每一台车",
             "target 必须包含 x/y 数值",
-            "timeout 必须 > 0,并且适当大一些以保证技能执行",
+            "timeout 必须 > 5",
+            "地图x范围[-3.8, 3.8], y范围[-1.8, 1.8]",
         ],
     }
+    print("[kimi_manager] built prompt:")
+    print(json.dumps(payload, ensure_ascii=False))
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -60,11 +60,11 @@ def simple():
     print("✅ Kimi 回复：", response.choices[0].message.content)
 
 def main():
-    api_key = os.getenv("KIMI_API_KEY", "")
+    api_key = os.getenv("TEST_API_KEY", "")
     if not api_key:
-        raise ValueError("KIMI_API_KEY is empty")
+        raise ValueError("TEST_API_KEY is empty")
 
-    base_url = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
+    base_url = os.getenv("TEST_BASE_URL", "https://api.moonshot.cn/v1")
     client = OpenAI(api_key=api_key, base_url=base_url)
 
     # 测试输入与 kimi_manager 保持一致的结构。
@@ -84,7 +84,10 @@ def main():
     prompt = build_prompt(battle_state, robot_ids)
 
     response = client.chat.completions.create(
-        model="kimi-k2.5",
+        # model="kimi-k2.5",
+        # model="kimi-k2-turbo-preview",
+        # model="glm-4.7-flash",
+        model="glm-4.7-flashX",
         messages=[
             {
                 "role": "system",
@@ -96,6 +99,9 @@ def main():
             {"role": "user", "content": prompt},
         ],
         timeout=30.0,
+        extra_body={
+        "enable_thinking": False
+        },
     )
 
     raw_text = str(response.choices[0].message.content or "").strip()

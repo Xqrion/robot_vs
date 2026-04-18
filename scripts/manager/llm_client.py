@@ -6,6 +6,7 @@ import math
 import random
 
 import rospy
+
 import requests
 
 
@@ -40,6 +41,7 @@ class LLMClient(object):
         self._use_llm = bool(use_llm)
         self._llm_service_url = str(llm_service_url)
         self._llm_timeout_s = float(llm_timeout_s)
+        self._session = requests.Session()
 
     def plan_tasks(self, battle_state):
         """根据战场状态按确定性规则规划任务。
@@ -68,7 +70,7 @@ class LLMClient(object):
                     "battle_state": battle_state,
                     "robot_ids": list(robot_ids),
                 }
-                response = requests.post(
+                response = self._session.post(
                     self._llm_service_url,
                     json=payload,
                     timeout=self._llm_timeout_s,

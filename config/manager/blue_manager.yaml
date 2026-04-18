@@ -1,13 +1,13 @@
 team_color: "blue"
-# my_cars: ["robot_blue", "robot_blue2"]
-my_cars: ["robot_blue"] #"robot_blue2" --- IGNORE ---
-loop_hz: 1
-state_timeout_s: 5.0
+my_cars: ["robot_blue", "robot_blue2"]
+# my_cars: ["robot_blue"] #"robot_blue2"
+loop_hz: 0.2
+state_timeout_s: 8.0
 default_patrol_points:
   - [-0.5, 0.0]
   - [-1.0, -1.0]
   - [0.0, -1.2]
 llm:
   enabled: true
-  service_url: "http://127.0.0.1:8001/plan"
-  timeout_s: 60
+  service_url: "http://127.0.0.1:8002/plan"
+  timeout_s: 30

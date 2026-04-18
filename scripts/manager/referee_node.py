@@ -41,16 +41,14 @@ class RefereeNode(object):
         self.occ_threshold = int(rospy.get_param("~occ_threshold", 50))  # 0~100, >=阈值视为障碍
         self.block_unknown = bool(rospy.get_param("~block_unknown", True))  # -1 unknown 是否当障碍
 
-        self._map = None
         self._map_info = None
         self._map_data = None
-        self._map_stamp = None
 
         self._map_sub = rospy.Subscriber(self.map_topic, OccupancyGrid, self._on_map, queue_size=1)
 
         self._lock = threading.RLock()
 
-        # dict[ns] = {"team", "x", "y", "yaw", "hp", "alive", "last_update"}
+        # dict[ns] = {"team", "x", "y", "yaw", "hp", "alive", "ammo"}
         self.global_states = {}
 
         self._robot_state_subs = {}
@@ -100,6 +98,21 @@ class RefereeNode(object):
         return "unknown"
 
     @staticmethod
+    def _decode_team_code(team_code):
+        """把 RobotState.team 的数值编码转为字符串阵营。"""
+        try:
+            code = int(team_code)
+        except (TypeError, ValueError):
+            return "unknown"
+
+        # 约定来自 car 配置：0=red, 1=blue
+        if code == 0:
+            return "red"
+        if code == 1:
+            return "blue"
+        return "unknown"
+
+    @staticmethod
     def _quaternion_to_yaw(q):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
@@ -122,7 +135,6 @@ class RefereeNode(object):
             "hp": int(self.default_hp),
             "ammo": float(self.default_ammo),
             "alive": True,
-            "last_update": rospy.Time.now().to_sec(),
         }
         self.global_states[ns] = record
         rospy.loginfo("[referee] tracking robot: ns=%s team=%s", ns, record["team"])
@@ -174,10 +186,33 @@ class RefereeNode(object):
             if record is None:
                 return
 
+            team_from_msg = self._decode_team_code(msg.team)
+            team_from_ns = self._detect_team(ns)
+            if team_from_msg in ("red", "blue"):
+                prev_team = record.get("team", "unknown")
+                if team_from_ns in ("red", "blue") and team_from_ns != team_from_msg:
+                    rospy.logwarn_throttle(
+                        2.0,
+                        "[referee] team mismatch: ns=%s ns_team=%s msg_team=%s",
+                        ns,
+                        team_from_ns,
+                        team_from_msg,
+                    )
+                if prev_team != team_from_msg:
+                    rospy.loginfo(
+                        "[referee] team updated by RobotState: ns=%s %s->%s",
+                        ns,
+                        prev_team,
+                        team_from_msg,
+                    )
+                record["team"] = team_from_msg
+            elif record.get("team", "unknown") not in ("red", "blue"):
+                # msg.team 无法解析时，才回退到命名空间推断。
+                record["team"] = team_from_ns
+
             record["x"] = float(msg.pose.position.x)
             record["y"] = float(msg.pose.position.y)
             record["yaw"] = float(self._quaternion_to_yaw(msg.pose.orientation))
-            record["last_update"] = rospy.Time.now().to_sec()
 
     def _ray_hit(self, shooter_x, shooter_y, shooter_yaw, target_x, target_y):
         dx = float(target_x) - float(shooter_x)
@@ -291,7 +326,6 @@ class RefereeNode(object):
             shooter["x"] = float(msg.x)
             shooter["y"] = float(msg.y)
             shooter["yaw"] = float(msg.yaw)
-            shooter["last_update"] = rospy.Time.now().to_sec()
 
             enemy_team = "blue" if shooter_team == "red" else "red"
             for enemy_ns, enemy in self.global_states.items():
@@ -451,10 +485,8 @@ class RefereeNode(object):
 
     def _on_map(self, msg):
         with self._lock:
-            self._map = msg
             self._map_info = msg.info
             self._map_data = msg.data  # tuple/list of int8
-            self._map_stamp = rospy.Time.now().to_sec()
 
 def main():
     rospy.init_node("referee_node", anonymous=False)
