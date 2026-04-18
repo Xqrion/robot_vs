@@ -1,7 +1,7 @@
 team_color: "red"
 my_cars: ["robot_red", "robot_red2"]
 # my_cars: ["robot_red"] #"robot_red2"
-loop_hz: 0.2
+loop_hz: 1.0
 state_timeout_s: 8.0
 default_patrol_points:
   - [1.0, 1.0]

@@ -472,47 +472,6 @@ def _resolve_side_models_cfg(models_cfg: Mapping[str, Any], side: str) -> Dict[s
 		llm_cfg = {}
 	llm_cfg = dict(llm_cfg)
 
-	legacy_ai = resolved.get("legacy_ai", {})
-	active_model_name = ""
-	if isinstance(legacy_ai, Mapping):
-		active_model_name = str(legacy_ai.get("active_model", "")).strip()
-
-		sides_cfg = legacy_ai.get("sides", {})
-		if isinstance(sides_cfg, Mapping):
-			side_cfg = sides_cfg.get(side, {})
-			if isinstance(side_cfg, Mapping):
-				side_active = str(side_cfg.get("active_model", "")).strip()
-				if side_active:
-					active_model_name = side_active
-
-		model_pool = legacy_ai.get("models", {})
-		if isinstance(model_pool, Mapping) and active_model_name:
-			legacy_model_cfg = model_pool.get(active_model_name, {})
-			if isinstance(legacy_model_cfg, Mapping):
-				base_url = str(legacy_model_cfg.get("base_url", "")).strip()
-				model_name = str(legacy_model_cfg.get("model_name", "")).strip()
-				timeout_s = _as_float(
-					legacy_model_cfg.get("timeout_s", llm_cfg.get("default_timeout_s", 8.0)),
-					_as_float(llm_cfg.get("default_timeout_s", 8.0), 8.0),
-				)
-
-				if base_url:
-					llm_cfg["base_url"] = base_url
-				llm_cfg["default_timeout_s"] = timeout_s
-
-				if model_name:
-					for role_key in ("leader_model", "car_model"):
-						role_cfg = resolved.get(role_key, {})
-						if not isinstance(role_cfg, Mapping):
-							role_cfg = {}
-						role_cfg = dict(role_cfg)
-						role_cfg["name"] = model_name
-						role_cfg["timeout_s"] = timeout_s
-						resolved[role_key] = role_cfg
-
-	if active_model_name:
-		resolved["resolved_active_model"] = active_model_name
-
 	api_key, key_source = _resolve_api_key_for_side(side=side, default_api_key=llm_cfg.get("api_key", ""))
 	llm_cfg["api_key"] = api_key
 	llm_cfg["api_key_source"] = key_source
