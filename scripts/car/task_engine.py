@@ -52,7 +52,7 @@ class TaskEngine(object):
 
             rospy.loginfo(
                 "[%s] TaskEngine: new task task_id=%d action=%s target=(%.2f, %.2f)",
-                self.ns, msg.task_id, msg.action_type, msg.target_x, msg.target_y,
+                self.ns, msg.task_id, msg.action_type, msg.target_x, msg.target_y, msg.target_yaw
             )
 
             task_dict = {
@@ -60,6 +60,7 @@ class TaskEngine(object):
                 "action_type": msg.action_type,
                 "target_x": msg.target_x,
                 "target_y": msg.target_y,
+                "target_yaw": msg.target_yaw,
                 "mode": msg.mode,
                 "reason": msg.reason,
                 "timeout": msg.timeout,
@@ -156,6 +157,7 @@ class TaskEngine(object):
             "action_type": "STOP",
             "target_x": 0.0,
             "target_y": 0.0,
+            "target_yaw": 0.0,
             "mode": 0,
             "reason": "timeout",
             "timeout": 0.0,

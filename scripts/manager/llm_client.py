@@ -304,8 +304,9 @@ class LLMClient(object):
         return {
             "action": str(action),
             "target": {
-                "x": float(target_point["x"]),
-                "y": float(target_point["y"]),
+                "x": float(target_point.get("x", 0.0)),
+                "y": float(target_point.get("y", 0.0)),
+                "yaw": float(target_point.get("yaw", 0.0)),
             },
             "mode": int(mode),
             "reason": str(reason),
@@ -372,15 +373,17 @@ class LLMClient(object):
             return {
                 "x": float(point.get("x", 0.0)),
                 "y": float(point.get("y", 0.0)),
+                "yaw": float(point.get("yaw", 0.0)),
             }
-
+        
         if isinstance(point, (list, tuple)) and len(point) >= 2:
+            yaw = float(point[2]) if len(point) >= 3 else 0.0
             return {
                 "x": float(point[0]),
                 "y": float(point[1]),
+                "yaw": yaw,
             }
-
-        return {"x": 0.0, "y": 0.0}
+        return {"x": 0.0, "y": 0.0, "yaw": 0.0}
 
     def _random_near_enemy_point(self, x, y):
         # 在敌人附近生成随机目标点，避免直接重合导致拥挤/碰撞。
@@ -405,7 +408,7 @@ class LLMClient(object):
                 continue
 
             action = str(raw.get("action", "STOP")).upper()
-            if action not in ("STOP", "GOTO", "ATTACK"):
+            if action not in ("STOP", "GOTO", "ATTACK", "ROTATE"):
                 action = "STOP"
 
             target = raw.get("target", {"x": 0.0, "y": 0.0})

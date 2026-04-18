@@ -10,6 +10,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from move_base_msgs.msg import MoveBaseActionResult
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf.transformations import euler_from_quaternion
 from robot_vs.msg import BattleMacroState
 from robot_vs.msg import FireEvent
 from robot_vs.msg import RobotState
@@ -288,6 +289,7 @@ class SkillManager(object):
         from skills.goto_skill import GoToSkill
         from skills.stop_skill import StopSkill
         from skills.attack_skill import AttackSkill
+        from skills.rotate_skill import RotateSkill
 
         action = str(action_type).upper()
         if action == "GOTO":
@@ -296,6 +298,8 @@ class SkillManager(object):
             return StopSkill(self)
         elif action == "ATTACK":
             return AttackSkill(self)
+        elif action == "ROTATE":
+            return RotateSkill(self)
         else:
             rospy.logwarn(
                 "[%s] SkillManager: unknown action_type '%s', defaulting to StopSkill",
@@ -355,6 +359,15 @@ class SkillManager(object):
     def get_current_pose(self):
         with self._lock:
             return self._latest_pose
+            
+    def get_current_yaw(self):
+        with self._lock:
+            pose = self._latest_pose
+        if pose is None:
+             return None
+        q = pose.orientation
+        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        return yaw
 
     # ------------------------------------------------------------------
     # RobotState 发布
@@ -370,13 +383,16 @@ class SkillManager(object):
         msg.ammo = self.default_ammo
         msg.alive = True
         msg.in_combat = (self.active_action == "ATTACK")
-
+        msg.yaw = 0.0
         with self._lock:
             msg.hp = float(self.hp)
             msg.ammo = float(self.ammo)
             msg.alive = bool(self.is_alive)
             if self._latest_pose is not None:
                 msg.pose = self._latest_pose
+                q = self._latest_pose.orientation
+                _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+                msg.yaw = float(yaw)
             msg.twist = self._latest_twist
             msg.current_task_id = self._feedback["task_id"]
             msg.current_action = self._feedback["current_action"]

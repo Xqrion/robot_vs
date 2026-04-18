@@ -56,6 +56,7 @@ class TaskDispatcher(object):
 					"target": {
 						"x": float(item.get("target_x", 0.0)),
 						"y": float(item.get("target_y", 0.0)),
+						"yaw": float(item.get("target_yaw", 0.0)),
 					},
 					"mode": int(item.get("mode", 0)),
 					"reason": item.get("reason", "legacy format"),
@@ -72,7 +73,7 @@ class TaskDispatcher(object):
 	def _safe_stop_task(self, reason):
 		return {
 			"action": "STOP",
-			"target": {"x": 0.0, "y": 0.0},
+			"target": {"x": 0.0, "y": 0.0,"yaw": 0.0},
 			"mode": 0,
 			"reason": reason,
 			"timeout": self.default_timeout,
@@ -86,10 +87,11 @@ class TaskDispatcher(object):
 
 		target_x = float(target.get("x", 0.0))
 		target_y = float(target.get("y", 0.0))
+		target_yaw = float(target.get("yaw", 0.0))
 		mode = int(task.get("mode", 0))
 		timeout = float(task.get("timeout", self.default_timeout))
 
-		return (action, target_x, target_y, mode, timeout)
+		return (action, target_x, target_y, target_yaw, mode, timeout)
 
 	def _assign_task_id(self, ns, task):
 		signature = self._task_signature(task)
@@ -116,6 +118,7 @@ class TaskDispatcher(object):
 			target = {}
 		msg.target_x = float(target.get("x", 0.0))
 		msg.target_y = float(target.get("y", 0.0))
+		msg.target_yaw = float(target.get("yaw", 0.0))
 
 		msg.mode = int(task.get("mode", 0))
 		msg.reason = str(task.get("reason", ""))
