@@ -1,75 +1,62 @@
 # robot_vs
 
-本仓库实现了多机器人红蓝对抗系统，采用 **Manager + Car Agent + Skill** 三层架构：
-- **Manager 层**（`scripts/manager/`）：感知全局战场状态，调用 LLM 规划战术，通过 `TaskCommand` 消息向各小车下发任务。
-- **Car Agent 层**（`scripts/car/`）：每辆小车运行一个独立的 `car_node.py`，接收任务并通过技能（Skill）执行动作，同时将 `RobotState` 反馈给 Manager。
-- **Skill 系统**（`scripts/car/skills/`）：GoToSkill（导航）、StopSkill（刹车）、AttackSkill（攻击），实现任务的原子化执行。
+`robot_vs` 是一个 ROS1 多机器人红蓝对抗项目，当前包含两条并行技术线：
 
-详细架构说明与数据流图请参阅 → **[技术原理文档](TECHNICAL.md)**
+1. **ROS 对抗控制链路**：Manager 层 + Car 层 + Referee（裁判）
+2. **MAS 多智能体链路**：LeaderAgent + CarAgent + 记忆系统（STM/LTM）+ 大模型服务
 
 ---
 
-## 演示 / Demo
+## 核心特性
 
-> 🎬 演示图/视频即将更新，敬请期待……
-
----
-
-## 功能特性
-
-- 支持 **仿真环境** 与 **现实环境** 下的多机器人独立运行
-- 采用 **红方 / 蓝方 两个阵营** 的对抗结构
-  - 每个阵营有一个 Manager 节点负责 LLM 决策与任务分配
-  - 每辆小车运行一个 Car Agent，通过技能系统执行 GOTO / STOP / ATTACK 三类动作
-  - 小车携带 `mode` 字段区分待机 / 巡逻 / 攻击模式
-- 基于 **命名空间 + TF 前缀** 实现多机话题隔离，防止冲突
-- `TaskCommand` / `RobotState` 消息形成完整的任务下发与状态反馈闭环
-- 仿真与现实话题结构保持一致，便于算法迁移
-- 提供编辑好的 Rviz 可视化界面
+- 支持 Gazebo + Rviz 仿真与真实部署迁移
+- 红蓝双方独立决策与执行链路
+- 命名空间 + TF 前缀隔离，支持多车并行
+- `TaskCommand` / `RobotState` 闭环任务控制
+- 支持 `GOTO / STOP / ATTACK / ROTATE` 动作
+- 裁判节点统一处理可见敌人、命中判定、血量与弹药状态
 
 ---
 
 ## 快速开始
 
-详细的环境搭建与部署步骤请参考 → **[环境配置文档](INSTALL.md)**
+完整环境安装请先看 **[INSTALL.md](INSTALL.md)**。
 
 ```bash
-# 1. 克隆项目到 ROS 工作空间
+# 1) 克隆到 catkin 工作空间
 cd ~/catkin_ws/src
 git clone https://github.com/Xqrion/robot_vs.git
 
-# 2. 编译
-cd ~/catkin_ws && catkin_make && source devel/setup.bash
+# 2) 编译并加载环境
+cd ~/catkin_ws
+catkin_make
+source devel/setup.bash
 
-# 3. 启动 Manager（默认只启动红方；如需蓝方，取消注释 launch/manager/managers.launch 中对应节点）
+# 3) 启动管理层（红蓝 Manager + Referee，按 launch 配置）
 roslaunch robot_vs managers.launch
 
-# 4. 启动 Car Agent（红蓝各一辆；按需取消注释 launch/car/cars.launch 中多车配置）
+# 4) 启动车辆层
 roslaunch robot_vs cars.launch
 ```
-
-> 两个 launch 文件均会自动加载对应的 YAML 配置文件，无需手动传参。  
-> 如需修改巡逻点、队伍颜色等参数，请直接编辑 `config/` 目录下对应的 YAML 文件。
 
 ---
 
 ## 文档索引
 
 | 文档 | 内容 |
-|------|------|
-| [环境配置](INSTALL.md) | 虚拟机搭建、ROS 安装、项目部署全流程 |
-| [技术原理](TECHNICAL.md) | 系统架构、Manager/Car/Skill 详解、ROS 消息流、数据流图 |
+|---|---|
+| [INSTALL.md](INSTALL.md) | 环境安装与部署 |
+| [TECHNICAL.md](TECHNICAL.md) | ROS 技术文档（Manager/Car/Referee、消息流、可视化） |
+| [TECHNICAL_MAS.md](TECHNICAL_MAS.md) | MAS 技术文档（LeaderAgent/CarAgent、记忆系统、LLM 服务、可视化） |
 
 ---
 
-## 项目状态
+## 当前进展
 
 | 模块 | 状态 |
-|------|------|
-| 仿真环境（Gazebo + Rviz） | ✅ 已完成 |
-| 红蓝阵营 Manager 框架 | ✅ 已完成 |
-| 真机局域网下通信测试 | ✅ 已完成 |
-| Car Agent + Skill 系统 | ✅ 已完成 |
-| 裁判系统对接 | 🚧 进行中 |
-| 大模型接入 | 🚧 进行中 |
-| 现实环境部署 | 🚧 进行中 |
+|---|---|
+| 多机器人仿真链路 | ✅ |
+| Manager + Car + Skill | ✅ |
+| Referee 裁判链路 | ✅ |
+| MAS + LLM 双速率规划 | ✅（迭代中） |
+| 真机稳定化与策略优化 | 🚧 |
