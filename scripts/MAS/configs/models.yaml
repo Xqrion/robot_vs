@@ -1,5 +1,6 @@
 llm:
   provider: openai_compat
+  use_openai_sdk: true
   base_url: "https://api.moonshot.cn/v1"
   api_key: ""
   endpoint: "/chat/completions"
@@ -9,9 +10,10 @@ llm:
   max_concurrency: 8
 
 leader_model:
-  name: "kimi-k2.5"
+  # name: "kimi-k2.5"
+  name: "kimi-k2-turbo-preview"
   temperature: 1
-  max_tokens: 512
+  max_tokens: 1024
   top_p: 0.95
   timeout_s: 30.0
   retries: 2
@@ -22,13 +24,15 @@ car_model:
   temperature: 0.2
   max_tokens: 256
   top_p: 0.9
-  timeout_s: 2.0
+  timeout_s: 5.0
   retries: 1
   backoff_s: 0.3
 
 runtime:
-  leader_loop_interval_s: 10.0
-  car_loop_interval_s: 3.0
+  leader_loop_interval_s: 30.0
+  car_loop_interval_s: 5.0
+  split_prompt_logs: true
+  prompt_log_per_run: true
   team_ports:
     red: 8001
     blue: 8002

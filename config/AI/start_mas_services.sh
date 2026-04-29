@@ -41,9 +41,15 @@ LOG_LEVEL="${MAS_LOG_LEVEL:-info}"
 # - MAS_LOG_PROMPTS: 1 to enable prompt trace logging (default on for debugging)
 # - MAS_PROMPT_LOG_FILE: output file for formatted prompt/response trace
 # - MAS_PROMPT_LOG_CONSOLE: 1 to also print full trace in terminal (default off)
+# - MAS_SPLIT_PROMPT_LOGS: 1 to split into leader/car log files
+# - MAS_PROMPT_LOG_PER_RUN: 1 to generate new files per run
+# - MAS_RUN_ID: run label used in output filenames (auto-generated when empty)
 export MAS_LOG_PROMPTS="${MAS_LOG_PROMPTS:-1}"
 export MAS_PROMPT_LOG_FILE="${MAS_PROMPT_LOG_FILE:-$SCRIPT_DIR/../../debug/mas_llm_trace.log}"
 export MAS_PROMPT_LOG_CONSOLE="${MAS_PROMPT_LOG_CONSOLE:-0}"
+export MAS_SPLIT_PROMPT_LOGS="${MAS_SPLIT_PROMPT_LOGS:-1}"
+export MAS_PROMPT_LOG_PER_RUN="${MAS_PROMPT_LOG_PER_RUN:-1}"
+export MAS_RUN_ID="${MAS_RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 
 # Keep prompts_2 as current default, but allow override from environment.
 export MAS_PROMPTS_FILE="${MAS_PROMPTS_FILE:-prompts_2.yaml}"
@@ -106,6 +112,7 @@ echo "Host: $HOST"
 echo "Ports: red=$RED_PORT blue=$BLUE_PORT"
 echo "Prompts File: ${MAS_PROMPTS_FILE}"
 echo "Prompt Trace: enabled=${MAS_LOG_PROMPTS} console=${MAS_PROMPT_LOG_CONSOLE} file=${MAS_PROMPT_LOG_FILE}"
+echo "Prompt Trace Split: split=${MAS_SPLIT_PROMPT_LOGS} per_run=${MAS_PROMPT_LOG_PER_RUN} run_id=${MAS_RUN_ID}"
 echo "Configs Root: $CONFIGS_ROOT"
 
 python "$PYTHON_SCRIPT" \

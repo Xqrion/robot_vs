@@ -85,8 +85,8 @@ def main():
   
 
     response = client.chat.completions.create(
-        # model="kimi-k2.5",
-        model="kimi-k2-turbo-preview",
+        model="kimi-k2.5",
+        # model="kimi-k2-turbo-preview",
         # model="glm-4.7-flash",
         # model="glm-4.7-flashX",
         messages=[
@@ -99,10 +99,8 @@ def main():
             },
             {"role": "user", "content": prompt},
         ],
-        timeout=30.0,
-        extra_body={
-        "enable_thinking": False
-        },
+        timeout=90.0,
+
     )
 
     raw_text = str(response.choices[0].message.content or "").strip()

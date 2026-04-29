@@ -18,10 +18,16 @@ import os
 from pathlib import Path
 import random
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import httpx
+
+try:
+	from openai import AsyncOpenAI
+except Exception:  # pragma: no cover
+	AsyncOpenAI = None  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -359,6 +365,10 @@ class AsyncLLMClient:
 		log_prompts: bool = False,
 		prompt_log_file: str = "",
 		prompt_log_console: bool = False,
+		split_prompt_logs: bool = False,
+		prompt_log_per_run: bool = False,
+		prompt_log_run_id: str = "",
+		use_openai_sdk: bool = False,
 	) -> None:
 		base = str(base_url).strip()
 		if not base:
@@ -370,18 +380,49 @@ class AsyncLLMClient:
 		self.log_prompts = bool(log_prompts)
 		self.prompt_log_file = str(prompt_log_file or "").strip()
 		self.prompt_log_console = bool(prompt_log_console)
+		self.split_prompt_logs = bool(split_prompt_logs)
+		self.prompt_log_per_run = bool(prompt_log_per_run)
+		self.prompt_log_run_id = str(prompt_log_run_id or "").strip() or _utc_run_id()
 		self._trace_file_lock = asyncio.Lock()
+		self.use_openai_sdk = bool(use_openai_sdk)
+		if self.use_openai_sdk and self.endpoint != "/chat/completions":
+			logger.warning(
+				"OpenAI SDK path only supports /chat/completions, got endpoint=%s; fallback to httpx",
+				self.endpoint,
+			)
+			self.use_openai_sdk = False
 
 		concurrency = max(1, int(max_concurrency))
 		self._semaphore = asyncio.Semaphore(concurrency)
+		self._openai_client = None
+		self._client = None
 
-		headers: Dict[str, str] = {"Content-Type": "application/json"}
-		if api_key:
-			headers["Authorization"] = "Bearer {}".format(api_key)
-		if extra_headers:
-			headers.update(dict(extra_headers))
+		if self.use_openai_sdk:
+			if AsyncOpenAI is None:
+				raise ValueError("openai package is required when use_openai_sdk=True")
+			resolved_api_key = str(api_key or "").strip() or str(os.getenv("OPENAI_API_KEY", "")).strip()
+			if not resolved_api_key:
+				logger.warning(
+					"OpenAI SDK requested but no API key resolved (llm.api_key/OPENAI_API_KEY empty); fallback to httpx"
+				)
+				self.use_openai_sdk = False
+			else:
+				default_headers = dict(extra_headers) if extra_headers else None
+				self._openai_client = AsyncOpenAI(
+					api_key=resolved_api_key,
+					base_url=self.base_url,
+					timeout=float(transport_timeout_s),
+					default_headers=default_headers,
+				)
 
-		self._client = httpx.AsyncClient(headers=headers, timeout=float(transport_timeout_s))
+		if not self.use_openai_sdk:
+			headers: Dict[str, str] = {"Content-Type": "application/json"}
+			if api_key:
+				headers["Authorization"] = "Bearer {}".format(api_key)
+			if extra_headers:
+				headers.update(dict(extra_headers))
+
+			self._client = httpx.AsyncClient(headers=headers, timeout=float(transport_timeout_s))
 
 	@classmethod
 	def from_models_config(cls, models_cfg: Mapping[str, Any]) -> "AsyncLLMClient":
@@ -397,10 +438,34 @@ class AsyncLLMClient:
 		log_prompts = _as_bool(runtime_cfg.get("log_prompts", False), default=False)
 		prompt_log_console = _as_bool(runtime_cfg.get("prompt_log_console", False), default=False)
 		prompt_log_file = str(runtime_cfg.get("prompt_log_file", "")).strip()
+		split_prompt_logs = _as_bool(runtime_cfg.get("split_prompt_logs", False), default=False)
+		prompt_log_per_run = _as_bool(runtime_cfg.get("prompt_log_per_run", False), default=False)
+		prompt_log_run_id = str(runtime_cfg.get("prompt_log_run_id", "")).strip()
+		use_openai_sdk = _as_bool(llm_cfg.get("use_openai_sdk", False), default=False)
+
+		provider = str(llm_cfg.get("provider", "openai_compat")).strip() or "openai_compat"
+		if provider.lower() in ("openai", "openai_sdk"):
+			use_openai_sdk = True
 
 		env_log_prompts = os.getenv("MAS_LOG_PROMPTS")
 		if env_log_prompts is not None and str(env_log_prompts).strip() != "":
 			log_prompts = _as_bool(env_log_prompts, default=log_prompts)
+
+		env_split_prompt_logs = os.getenv("MAS_SPLIT_PROMPT_LOGS")
+		if env_split_prompt_logs is not None and str(env_split_prompt_logs).strip() != "":
+			split_prompt_logs = _as_bool(env_split_prompt_logs, default=split_prompt_logs)
+
+		env_prompt_log_per_run = os.getenv("MAS_PROMPT_LOG_PER_RUN")
+		if env_prompt_log_per_run is not None and str(env_prompt_log_per_run).strip() != "":
+			prompt_log_per_run = _as_bool(env_prompt_log_per_run, default=prompt_log_per_run)
+
+		env_prompt_log_run_id = os.getenv("MAS_RUN_ID", "") or os.getenv("MAS_PROMPT_LOG_RUN_ID", "")
+		if env_prompt_log_run_id and str(env_prompt_log_run_id).strip() != "":
+			prompt_log_run_id = str(env_prompt_log_run_id).strip()
+
+		env_use_openai_sdk = os.getenv("MAS_USE_OPENAI_SDK")
+		if env_use_openai_sdk is not None and str(env_use_openai_sdk).strip() != "":
+			use_openai_sdk = _as_bool(env_use_openai_sdk, default=use_openai_sdk)
 
 		env_prompt_log_console = os.getenv("MAS_PROMPT_LOG_CONSOLE")
 		if env_prompt_log_console is not None and str(env_prompt_log_console).strip() != "":
@@ -417,16 +482,27 @@ class AsyncLLMClient:
 			base_url=str(llm_cfg.get("base_url", "")).strip(),
 			api_key=str(llm_cfg.get("api_key", "")).strip(),
 			endpoint=str(llm_cfg.get("endpoint", "/chat/completions")).strip() or "/chat/completions",
-			provider=str(llm_cfg.get("provider", "openai_compat")).strip() or "openai_compat",
+			provider=provider,
 			max_concurrency=max(1, _as_int(llm_cfg.get("max_concurrency", 8), "llm.max_concurrency")),
 			transport_timeout_s=max(1.0, _as_float(llm_cfg.get("default_timeout_s", 8.0), "llm.default_timeout_s") * 3.0),
 			log_prompts=log_prompts,
 			prompt_log_file=prompt_log_file,
 			prompt_log_console=prompt_log_console,
+			split_prompt_logs=split_prompt_logs,
+			prompt_log_per_run=prompt_log_per_run,
+			prompt_log_run_id=prompt_log_run_id,
+			use_openai_sdk=use_openai_sdk,
 		)
 
 	async def close(self) -> None:
-		await self._client.aclose()
+		if self._client is not None:
+			await self._client.aclose()
+		if self._openai_client is not None:
+			close_func = getattr(self._openai_client, "close", None)
+			if callable(close_func):
+				result = close_func()
+				if asyncio.iscoroutine(result):
+					await result
 
 	async def __aenter__(self) -> "AsyncLLMClient":
 		return self
@@ -503,12 +579,13 @@ class AsyncLLMClient:
 
 	async def _emit_trace_block(self, trace_block: str, trace_tag: str, model: str) -> None:
 		if self.prompt_log_file:
-			await self._append_trace_file(trace_block)
+			target_file = self._resolve_trace_file_path(trace_tag)
+			await self._append_trace_file(target_file=target_file, trace_block=trace_block)
 			logger.debug(
 				"LLM_TRACE_WRITTEN tag=%s model=%s file=%s",
 				trace_tag or "-",
 				model,
-				self.prompt_log_file,
+				target_file,
 			)
 			return
 
@@ -518,22 +595,43 @@ class AsyncLLMClient:
 
 		logger.info("LLM_TRACE tag=%s model=%s (enabled, but no output target configured)", trace_tag or "-", model)
 
-	async def _append_trace_file(self, trace_block: str) -> None:
-		if not self.prompt_log_file:
+	async def _append_trace_file(self, target_file: str, trace_block: str) -> None:
+		if not target_file:
 			return
 
 		async with self._trace_file_lock:
-			await asyncio.to_thread(self._append_trace_file_sync, self.prompt_log_file, trace_block)
+			await asyncio.to_thread(self._append_trace_file_sync, target_file, trace_block)
+
+	def _resolve_trace_file_path(self, trace_tag: str) -> str:
+		base = Path(self.prompt_log_file).expanduser()
+		if not base.is_absolute():
+			base = (Path.cwd() / base)
+
+		if (not self.split_prompt_logs) and (not self.prompt_log_per_run):
+			return str(base)
+
+		suffix = base.suffix or ".log"
+		stem = base.stem if base.suffix else base.name
+
+		name_parts: List[str] = [stem]
+		if self.prompt_log_per_run:
+			name_parts.append(_sanitize_file_label(self.prompt_log_run_id))
+		if self.split_prompt_logs:
+			name_parts.append(_trace_bucket(trace_tag))
+
+		filename = "_".join(part for part in name_parts if part) + suffix
+		return str(base.parent / filename)
 
 	@staticmethod
 	def _append_trace_file_sync(path_text: str, trace_block: str) -> None:
 		path = Path(path_text).expanduser()
 		if not path.is_absolute():
 			path = Path.cwd() / path
-
-		path.parent.mkdir(parents=True, exist_ok=True)
-		with path.open("a", encoding="utf-8") as f:
-			f.write(trace_block)
+		lock = _get_log_file_lock(str(path))
+		with lock:
+			path.parent.mkdir(parents=True, exist_ok=True)
+			with path.open("a", encoding="utf-8") as f:
+				f.write(trace_block)
 
 	async def request_actions(
 		self,
@@ -580,19 +678,14 @@ class AsyncLLMClient:
 		for attempt_idx in range(total_attempts):
 			try:
 				async with self._semaphore:
-					response = await self._client.post(
-						url,
-						json=dict(payload),
-						timeout=float(profile.timeout_s),
-					)
+					if self.use_openai_sdk:
+						data = await self._request_json_via_openai_sdk(payload=payload, profile=profile)
+					else:
+						data = await self._request_json_via_httpx(url=url, payload=payload, timeout_s=float(profile.timeout_s))
 
-				if response.status_code in self.RETRIABLE_HTTP_STATUS:
-					raise _RetriableStatusError(response.status_code, response.text[:400])
-
-				response.raise_for_status()
-				data = response.json()
 				if not isinstance(data, dict):
 					raise LLMAPIError("LLM response payload must be a JSON object")
+				self._raise_if_error_payload(data)
 				return data
 
 			except _RetriableStatusError as exc:
@@ -605,6 +698,16 @@ class AsyncLLMClient:
 				status = exc.response.status_code if exc.response is not None else "unknown"
 				body = exc.response.text[:500] if exc.response is not None else str(exc)
 				raise LLMAPIError("Non-retriable LLM HTTP error {}: {}".format(status, body))
+			except Exception as exc:
+				if self.use_openai_sdk and self._looks_like_openai_error(exc):
+					status_code = self._extract_openai_status_code(exc)
+					if status_code in self.RETRIABLE_HTTP_STATUS or status_code <= 0:
+						last_error = exc
+						logger.warning("Transient OpenAI SDK error on attempt %s/%s: %s", attempt_idx + 1, total_attempts, exc)
+					else:
+						raise LLMAPIError("Non-retriable LLM HTTP error {}: {}".format(status_code, exc))
+				else:
+					raise
 			except ValueError as exc:
 				raise LLMAPIError("LLM response was not valid JSON: {}".format(exc))
 
@@ -616,6 +719,78 @@ class AsyncLLMClient:
 			await asyncio.sleep(delay_s)
 
 		raise LLMAPIError("LLM request failed after {} attempts: {}".format(total_attempts, last_error))
+
+	async def _request_json_via_httpx(self, url: str, payload: Mapping[str, Any], timeout_s: float) -> Dict[str, Any]:
+		if self._client is None:
+			raise LLMAPIError("HTTP transport client is not initialized")
+
+		response = await self._client.post(
+			url,
+			json=dict(payload),
+			timeout=float(timeout_s),
+		)
+
+		if response.status_code in self.RETRIABLE_HTTP_STATUS:
+			raise _RetriableStatusError(response.status_code, response.text[:400])
+
+		response.raise_for_status()
+		data = response.json()
+		if not isinstance(data, dict):
+			raise LLMAPIError("LLM response payload must be a JSON object")
+		return data
+
+	async def _request_json_via_openai_sdk(
+		self,
+		payload: Mapping[str, Any],
+		profile: LLMRequestProfile,
+	) -> Dict[str, Any]:
+		if self._openai_client is None:
+			raise LLMAPIError("OpenAI SDK client is not initialized")
+
+		request_payload = dict(payload)
+		request_payload["timeout"] = float(profile.timeout_s)
+		response = await self._openai_client.chat.completions.create(**request_payload)
+
+		if hasattr(response, "model_dump"):
+			data = response.model_dump()
+		elif hasattr(response, "to_dict"):
+			data = response.to_dict()
+		else:
+			raise LLMAPIError("OpenAI SDK response object does not support dict conversion")
+
+		if not isinstance(data, dict):
+			raise LLMAPIError("OpenAI SDK response payload must be a JSON object")
+
+		return data
+
+	@staticmethod
+	def _raise_if_error_payload(data: Mapping[str, Any]) -> None:
+		error_obj = data.get("error")
+		if isinstance(error_obj, Mapping):
+			error_msg = str(error_obj.get("message", error_obj)).strip()
+			error_code = str(error_obj.get("code", "")).strip()
+			raise LLMAPIError(
+				"LLM error payload{}: {}".format(
+					(" code=" + error_code) if error_code else "",
+					error_msg or "unknown error",
+				)
+			)
+
+	@staticmethod
+	def _looks_like_openai_error(exc: Exception) -> bool:
+		module_name = str(exc.__class__.__module__)
+		return module_name.startswith("openai")
+
+	@staticmethod
+	def _extract_openai_status_code(exc: Exception) -> int:
+		status = getattr(exc, "status_code", None)
+		if status is None:
+			response = getattr(exc, "response", None)
+			status = getattr(response, "status_code", None)
+		try:
+			return int(status)
+		except (TypeError, ValueError):
+			return -1
 
 
 __all__ = [
@@ -629,3 +804,44 @@ __all__ = [
 	"parse_action_list",
 	"render_prompt",
 ]
+
+
+_LOG_FILE_LOCKS: Dict[str, threading.Lock] = {}
+_LOG_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _get_log_file_lock(path_text: str) -> threading.Lock:
+	key = str(path_text)
+	with _LOG_FILE_LOCKS_GUARD:
+		lock = _LOG_FILE_LOCKS.get(key)
+		if lock is None:
+			lock = threading.Lock()
+			_LOG_FILE_LOCKS[key] = lock
+	return lock
+
+
+def _trace_bucket(trace_tag: str) -> str:
+	tag = str(trace_tag or "").strip().lower()
+	if tag.startswith("leader:"):
+		return "leader"
+	if tag.startswith("car:"):
+		return "car"
+	return "other"
+
+
+def _sanitize_file_label(value: str) -> str:
+	text = str(value or "").strip()
+	if not text:
+		return "run"
+	chars: List[str] = []
+	for ch in text:
+		if ch.isalnum() or ch in ("-", "_"):
+			chars.append(ch)
+		else:
+			chars.append("_")
+	cleaned = "".join(chars).strip("_")
+	return cleaned or "run"
+
+
+def _utc_run_id() -> str:
+	return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")

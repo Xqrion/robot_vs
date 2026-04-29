@@ -1,0 +1,7 @@
+<launch>
+	<!-- 2v2 仿真总入口：先起仿真，再起裁判/管理/车辆节点 -->
+	<include file="$(find robot_vs)/launch/simulation/multi_robot4.launch" />
+	<include file="$(find robot_vs)/launch/manager/referee.launch" />
+	<include file="$(find robot_vs)/launch/manager/managers.launch" />
+	<include file="$(find robot_vs)/launch/car/cars4.launch" />
+</launch>
