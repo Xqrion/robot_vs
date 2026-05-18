@@ -1,6 +1,6 @@
 # 技术原理
 
-本文档介绍 robot_vs 的 **ROS 多机器人通信与裁判机制**，包含系统分层架构、Manager 决策机制、Car Agent 与 Skill 系统、裁判节点与 ROS 消息流，以及多机话题隔离与坐标系管理。  
+本文档介绍 robot_vs 的 **ROS 多机器人通信与裁判机制**，包含系统分层架构、Manager 决策机制、Car Agent 与 Skill 系统、裁判节点与 ROS 消息流，以及多机话题隔离与坐标系管理。
 MAS 多智能体体系的细节请参阅 → **[MAS 技术文档](MAS.md)**。
 
 ---
@@ -36,8 +36,8 @@ Car Agent 层 × N                    Car Agent 层 × N
      │                                    │
      ▼                                    ▼
 Skill 系统                           Skill 系统
-GoToSkill/StopSkill/AttackSkill/RotateSkill
-     │ RobotState / FireEvent             │ RobotState / FireEvent
+GoToSkill/StopSkill/AttackSkill/RotateSkill   GoToSkill/StopSkill/AttackSkill/RotateSkill
+     │ RobotState / FireEvent                  │ RobotState / FireEvent
      ▼                                    ▼
 Referee 裁判系统（全局唯一，裁判与可见性）
      ▲──────────────────                  ▲──────────────────
@@ -116,18 +116,18 @@ Car Agent (car_node.py)
   │                        _publish_robot_state() → 10 Hz
   │                        publish_fire_event() → /<ns>/fire_event
   └──────────────────────→ Skills
-                               GoToSkill → /<ns>/move_base_simple/goal
-                               StopSkill → /<ns>/cmd_vel (零速)
-                               AttackSkill → /<ns>/cmd_vel (转向) + 开火信号
-                               RotateSkill → /<ns>/cmd_vel (原地转向)
+       ├─ GoToSkill → /<ns>/move_base_simple/goal
+       ├─ StopSkill → /<ns>/cmd_vel (零速)
+       ├─ AttackSkill → /<ns>/cmd_vel (转向) + 开火信号
+       └─ RotateSkill → /<ns>/cmd_vel (原地转向)
      ▲  RobotState  (/<ns>/robot_state)
      │
 Manager (GlobalObserver)
 
- Referee (referee_node.py)
-     ├─ 订阅 /<ns>/robot_state, /<ns>/fire_event
-     ├─ 发布 /<team>_manager/enemy_state
-     └─ 发布 /referee/macro_state
+Referee (referee_node.py)
+   ├─ 订阅 /<ns>/robot_state, /<ns>/fire_event
+   ├─ 发布 /<team>_manager/enemy_state
+   └─ 发布 /referee/macro_state
 ```
 
 ---
