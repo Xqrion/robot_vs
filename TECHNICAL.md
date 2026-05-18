@@ -1,6 +1,7 @@
 # 技术原理
 
-本文档介绍 robot_vs 项目的核心技术设计，包括系统分层架构、Manager 决策机制、Car Agent 与 Skill 系统、ROS 消息流，以及多机话题隔离与坐标系管理。
+本文档介绍 robot_vs 的 **ROS 多机器人通信与裁判机制**，包含系统分层架构、Manager 决策机制、Car Agent 与 Skill 系统、裁判节点与 ROS 消息流，以及多机话题隔离与坐标系管理。  
+MAS 多智能体体系的细节请参阅 → **[MAS 技术文档](MAS.md)**。
 
 ---
 
@@ -11,16 +12,17 @@
 - [3. Manager 层](#3-manager-层)
 - [4. Car Agent 层](#4-car-agent-层)
 - [5. Skill 系统](#5-skill-系统)
-- [6. ROS 消息流](#6-ros-消息流)
-- [7. 多机器人命名空间与话题管理](#7-多机器人命名空间与话题管理)
-- [8. TF 坐标系前缀隔离](#8-tf-坐标系前缀隔离)
-- [9. 仿真与现实的一致性设计](#9-仿真与现实的一致性设计)
+- [6. Referee 裁判系统](#6-referee-裁判系统)
+- [7. ROS 消息流](#7-ros-消息流)
+- [8. 多机器人命名空间与话题管理](#8-多机器人命名空间与话题管理)
+- [9. TF 坐标系前缀隔离](#9-tf-坐标系前缀隔离)
+- [10. 仿真与现实的一致性设计](#10-仿真与现实的一致性设计)
 
 ---
 
 ## 1. 系统架构概览
 
-系统分为三层，红蓝双方**各自独立**运行一套完整的链路：
+系统分为三层，红蓝双方**各自独立**运行一套完整的链路，并由全局唯一的裁判节点进行战斗仲裁：
 
 ```
 红方阵营                              蓝方阵营
@@ -34,8 +36,10 @@ Car Agent 层 × N                    Car Agent 层 × N
      │                                    │
      ▼                                    ▼
 Skill 系统                           Skill 系统
-GoToSkill/StopSkill/AttackSkill      GoToSkill/StopSkill/AttackSkill
-     │ RobotState                         │ RobotState
+GoToSkill/StopSkill/AttackSkill/RotateSkill
+     │ RobotState / FireEvent             │ RobotState / FireEvent
+     ▼                                    ▼
+Referee 裁判系统（全局唯一，裁判与可见性）
      ▲──────────────────                  ▲──────────────────
      Manager 层                           Manager 层
 ```
@@ -47,6 +51,7 @@ GoToSkill/StopSkill/AttackSkill      GoToSkill/StopSkill/AttackSkill
 | Manager | `scripts/manager/manager_node.py` | 感知战场、调用 LLM、分发任务 |
 | Car Agent × N | `scripts/car/car_node.py` | 每辆小车独立运行一个实例 |
 | Skill | `scripts/car/skills/` | 技能库，由 Car Agent 内部调用 |
+| Referee | `scripts/manager/referee_node.py` | 全局裁判与可见性判定 |
 
 ---
 
@@ -73,11 +78,24 @@ flowchart LR
         G["GoToSkill\n发布 move_base goal"]
         S["StopSkill\n发布零速度"]
         A["AttackSkill\n转向 + 模拟开火"]
+        R["RotateSkill\n原地转向"]
+    end
+
+    subgraph Referee["Referee 裁判系统 (referee_node.py)"]
+        RS["订阅 /<ns>/robot_state"]
+        FE["订阅 /<ns>/fire_event"]
+        VIS["发布 /<team>_manager/enemy_state"]
+        MAC["发布 /referee/macro_state"]
+        RS --> VIS
+        FE --> MAC
     end
 
     DIS -- "/<ns>/task_cmd\n(TaskCommand)" --> SUB
     SM -- "/<ns>/robot_state\n(RobotState)" --> OBS
-    SM --> G & S & A
+    SM -- "/<ns>/fire_event\n(FireEvent)" --> FE
+    SM --> G & S & A & R
+    Referee -- "/<team>_manager/enemy_state" --> LLM
+    Referee -- "/referee/macro_state" --> OBS
 ```
 
 > 若 Markdown 渲染器不支持 Mermaid，请参考下方 ASCII 版本。  
@@ -96,13 +114,20 @@ Car Agent (car_node.py)
   │  tick() + timeout     publish_nav_goal()
   │                        publish_cmd_vel()
   │                        _publish_robot_state() → 10 Hz
+  │                        publish_fire_event() → /<ns>/fire_event
   └──────────────────────→ Skills
-                              GoToSkill → /<ns>/move_base_simple/goal
-                              StopSkill → /<ns>/cmd_vel (零速)
-                              AttackSkill → /<ns>/cmd_vel (转向) + 开火信号
+                               GoToSkill → /<ns>/move_base_simple/goal
+                               StopSkill → /<ns>/cmd_vel (零速)
+                               AttackSkill → /<ns>/cmd_vel (转向) + 开火信号
+                               RotateSkill → /<ns>/cmd_vel (原地转向)
      ▲  RobotState  (/<ns>/robot_state)
      │
 Manager (GlobalObserver)
+
+ Referee (referee_node.py)
+     ├─ 订阅 /<ns>/robot_state, /<ns>/fire_event
+     ├─ 发布 /<team>_manager/enemy_state
+     └─ 发布 /referee/macro_state
 ```
 
 ---
@@ -226,6 +251,7 @@ roslaunch robot_vs cars.launch
 | `GoToSkill` | `goto_skill.py` | `action_type = "GOTO"` | 向 `/<ns>/move_base_simple/goal` 发布目标点；监听 `/<ns>/move_base/result` 判断到达 |
 | `StopSkill` | `stop_skill.py` | `action_type = "STOP"` | 向 `/<ns>/cmd_vel` 发布零速度 Twist；立即返回 SUCCESS |
 | `AttackSkill` | `attack_skill.py` | `action_type = "ATTACK"` | 先停车，再计算目标方位，发布 `cmd_vel` 转向瞄准，模拟攻击延时后返回 SUCCESS |
+| `RotateSkill` | `rotate_skill.py` | `action_type = "ROTATE"` | 取消导航后原地转向到 `target_yaw`，误差内返回 SUCCESS |
 
 ### mode 字段
 
@@ -239,7 +265,31 @@ roslaunch robot_vs cars.launch
 
 ---
 
-## 6. ROS 消息流
+## 6. Referee 裁判系统
+
+**位置：** `scripts/manager/referee_node.py`
+
+裁判节点是全局唯一的战场仲裁者，负责 **命中判定、血量弹药结算、可见敌人计算与宏观战况发布**：
+
+- 动态发现并订阅 `/<ns>/robot_state`、`/<ns>/fire_event`
+- 根据地图 `/map` 判断视线遮挡（Bresenham 栅格射线）
+- 命中判定后扣血、更新存活状态
+- 周期发布可见敌人列表到 `/red_manager/enemy_state`、`/blue_manager/enemy_state`
+- 发布宏观战况 `/referee/macro_state`（总血量、弹药、存活统计）
+
+### 常用参数
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `~fire_range` | 允许命中距离 | `5.0` |
+| `~hit_width` | 射线命中宽度 | `0.5` |
+| `~vision_range` | 视野距离 | `4.0` |
+| `~fov_deg` | 视场角（度） | `120` |
+| `~map_topic` | 地图话题 | `/map` |
+
+---
+
+## 7. ROS 消息流
 
 ### TaskCommand（Manager → Car）
 
@@ -248,10 +298,11 @@ roslaunch robot_vs cars.launch
 
 ```
 uint32  task_id       # 任务流水号（递增，相同 ID = 同一任务）
-string  action_type   # 动作类型：GOTO / STOP / ATTACK
+string  action_type   # 动作类型：GOTO / STOP / ATTACK / ROTATE
 string  reason        # LLM 给出的战术意图（仅供日志记录）
 float32 target_x      # 目标 X 坐标（GOTO 终点 / ATTACK 瞄准点）
 float32 target_y      # 目标 Y 坐标
+float32 target_yaw    # 目标朝向（ROTATE 目标角度 / GOTO 可选）
 uint8   mode          # 期望模式：0 待机 / 1 巡逻 / 2 攻击
 float32 timeout       # 任务超时时间 (秒)，超时自动取消
 ```
@@ -281,9 +332,42 @@ geometry_msgs/Twist twist
 
 # 任务执行反馈（Manager 闭环控制的核心）
 uint32  current_task_id   # 正在执行或刚完成的任务 ID
-string  current_action    # 当前动作：GOTO / STOP / ATTACK
+string  current_action    # 当前动作：GOTO / STOP / ATTACK / ROTATE
 string  task_status       # 执行状态：RUNNING / SUCCESS / FAILED / IDLE
 uint8   mode              # 当前物理模式
+```
+
+### FireEvent（Car → Referee）
+
+**话题：** `/<ns>/fire_event`  
+**文件：** `msg/FireEvent.msg`
+
+```
+string shooter_ns
+float64 x
+float64 y
+float64 yaw
+uint32 fire_id
+```
+
+### VisibleEnemies（Referee → Manager）
+
+**话题：** `/red_manager/enemy_state`、`/blue_manager/enemy_state`  
+**文件：** `msg/VisibleEnemies.msg`
+
+```
+EnemyInfo[] enemies
+```
+
+### BattleMacroState（Referee → 可视化/上层）
+
+**话题：** `/referee/macro_state`  
+**文件：** `msg/BattleMacroState.msg`
+
+```
+std_msgs/Header header
+TeamMacroState red
+TeamMacroState blue
 ```
 
 ### 超时机制总览
@@ -298,7 +382,7 @@ uint8   mode              # 当前物理模式
 
 ---
 
-## 7. 多机器人命名空间与话题管理
+## 8. 多机器人命名空间与话题管理
 
 每辆小车的所有话题都挂载在其专属的命名空间下，实现多机话题隔离：
 
@@ -320,7 +404,7 @@ uint8   mode              # 当前物理模式
 
 ---
 
-## 8. TF 坐标系前缀隔离
+## 9. TF 坐标系前缀隔离
 
 为所有 TF 变换增加 **前缀 (prefix)**，使得每辆小车的 TF 树互相独立：
 
@@ -330,7 +414,7 @@ uint8   mode              # 当前物理模式
 
 ---
 
-## 9. 仿真与现实的一致性设计
+## 10. 仿真与现实的一致性设计
 
 ### 仿真环境
 
