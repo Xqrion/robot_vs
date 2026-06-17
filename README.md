@@ -3,7 +3,12 @@
 robot_vs 是一个可接入大模型多智能体机器人红蓝对抗系统，覆盖仿真与真机运行，支持规则/LLM/MAS多智能体 分层决策，并提供裁判与可视化能力。
 
 ## 演示 / Demo
-> 🎬 演示图/视频即将更新，敬请期待……
+
+### 仿真环境
+![仿真环境](assets/simulation.jpg)
+
+### 真机运行
+![真机运行](assets/real_machine.jpg)
 
 ## 项目亮点
 - Manager + Car Agent + Skill 三层控制架构
