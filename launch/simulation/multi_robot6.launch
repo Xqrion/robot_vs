@@ -1,0 +1,231 @@
+<launch>
+  <!-- ============================================== -->
+  <!-- 1. 核心参数 -->
+  <!-- ============================================== -->
+  <arg name="map_file" default="$(find robot_vs)/maps/map_simulation.yaml" doc="全局地图路径"/>
+  <arg name="world_file" default="$(find robot_vs)/worlds/world0.world" doc="仿真世界"/>
+  <arg name="model" default="burger" doc="burger, waffle, waffle_pi"/>
+
+  <!-- 红方 3 台初始位姿 -->
+  <arg name="robot_red1_x" default="-2.5"/>
+  <arg name="robot_red1_y" default="2.0"/>
+  <arg name="robot_red1_a" default="-1.57"/>
+
+  <arg name="robot_red2_x" default="0.0"/>
+  <arg name="robot_red2_y" default="2.0"/>
+  <arg name="robot_red2_a" default="-1.57"/>
+
+  <arg name="robot_red3_x" default="2.5"/>
+  <arg name="robot_red3_y" default="2.0"/>
+  <arg name="robot_red3_a" default="-1.57"/>
+
+  <!-- 蓝方 3 台初始位姿 -->
+  <arg name="robot_blue1_x" default="-2.5"/>
+  <arg name="robot_blue1_y" default="-3.0"/>
+  <arg name="robot_blue1_a" default="1.57"/>
+
+  <arg name="robot_blue2_x" default="0.0"/>
+  <arg name="robot_blue2_y" default="-3.0"/>
+  <arg name="robot_blue2_a" default="1.57"/>
+
+  <arg name="robot_blue3_x" default="2.5"/>
+  <arg name="robot_blue3_y" default="-3.0"/>
+  <arg name="robot_blue3_a" default="1.57"/>
+
+  <!-- ============================================== -->
+  <!-- 2. map_server -->
+  <!-- ============================================== -->
+  <node name="map_server" pkg="map_server" type="map_server" output="screen"
+        args="$(arg map_file)" />
+
+  <!-- ============================================== -->
+  <!-- 3. Gazebo 仿真环境 -->
+  <!-- ============================================== -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_file)"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="false"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 4. 红方机器人 1（robot_red1） -->
+  <!-- ============================================== -->
+  <group ns="robot_red1">
+    <param name="tf_prefix" value="robot_red1"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="10.0"/>
+      <param name="tf_prefix" value="robot_red1"/>
+    </node>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+      <param name="use_gui" value="false"/>
+      <param name="zero_initial_pose" value="true"/>
+    </node>
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+          args="-urdf -model robot_red1 -x $(arg robot_red1_x) -y $(arg robot_red1_y) -z 0.0 -Y $(arg robot_red1_a) -param /robot_red1/robot_description"/>
+  </group>
+
+  <include file="$(find robot_vs)/launch/simulation/amcl.launch">
+    <arg name="robot_namespace" value="robot_red1"/>
+    <arg name="initial_pose_x" value="$(arg robot_red1_x)"/>
+    <arg name="initial_pose_y" value="$(arg robot_red1_y)"/>
+    <arg name="initial_pose_a" value="$(arg robot_red1_a)"/>
+  </include>
+
+  <include file="$(find robot_vs)/launch/simulation/move_base.launch">
+    <arg name="robot_namespace" value="robot_red1"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 5. 红方机器人 2（robot_red2） -->
+  <!-- ============================================== -->
+  <group ns="robot_red2">
+    <param name="tf_prefix" value="robot_red2"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="10.0"/>
+      <param name="tf_prefix" value="robot_red2"/>
+    </node>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+      <param name="use_gui" value="false"/>
+      <param name="zero_initial_pose" value="true"/>
+    </node>
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+          args="-urdf -model robot_red2 -x $(arg robot_red2_x) -y $(arg robot_red2_y) -z 0.0 -Y $(arg robot_red2_a) -param /robot_red2/robot_description"/>
+  </group>
+
+  <include file="$(find robot_vs)/launch/simulation/amcl.launch">
+    <arg name="robot_namespace" value="robot_red2"/>
+    <arg name="initial_pose_x" value="$(arg robot_red2_x)"/>
+    <arg name="initial_pose_y" value="$(arg robot_red2_y)"/>
+    <arg name="initial_pose_a" value="$(arg robot_red2_a)"/>
+  </include>
+
+  <include file="$(find robot_vs)/launch/simulation/move_base.launch">
+    <arg name="robot_namespace" value="robot_red2"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 6. 红方机器人 3（robot_red3） -->
+  <!-- ============================================== -->
+  <group ns="robot_red3">
+    <param name="tf_prefix" value="robot_red3"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="10.0"/>
+      <param name="tf_prefix" value="robot_red3"/>
+    </node>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+      <param name="use_gui" value="false"/>
+      <param name="zero_initial_pose" value="true"/>
+    </node>
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+          args="-urdf -model robot_red3 -x $(arg robot_red3_x) -y $(arg robot_red3_y) -z 0.0 -Y $(arg robot_red3_a) -param /robot_red3/robot_description"/>
+  </group>
+
+  <include file="$(find robot_vs)/launch/simulation/amcl.launch">
+    <arg name="robot_namespace" value="robot_red3"/>
+    <arg name="initial_pose_x" value="$(arg robot_red3_x)"/>
+    <arg name="initial_pose_y" value="$(arg robot_red3_y)"/>
+    <arg name="initial_pose_a" value="$(arg robot_red3_a)"/>
+  </include>
+
+  <include file="$(find robot_vs)/launch/simulation/move_base.launch">
+    <arg name="robot_namespace" value="robot_red3"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 7. 蓝方机器人 1（robot_blue1） -->
+  <!-- ============================================== -->
+  <group ns="robot_blue1">
+    <param name="tf_prefix" value="robot_blue1"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="10.0"/>
+      <param name="tf_prefix" value="robot_blue1"/>
+    </node>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+      <param name="use_gui" value="false"/>
+      <param name="zero_initial_pose" value="true"/>
+    </node>
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+          args="-urdf -model robot_blue1 -x $(arg robot_blue1_x) -y $(arg robot_blue1_y) -z 0.0 -Y $(arg robot_blue1_a) -param /robot_blue1/robot_description"/>
+  </group>
+
+  <include file="$(find robot_vs)/launch/simulation/amcl.launch">
+    <arg name="robot_namespace" value="robot_blue1"/>
+    <arg name="initial_pose_x" value="$(arg robot_blue1_x)"/>
+    <arg name="initial_pose_y" value="$(arg robot_blue1_y)"/>
+    <arg name="initial_pose_a" value="$(arg robot_blue1_a)"/>
+  </include>
+
+  <include file="$(find robot_vs)/launch/simulation/move_base.launch">
+    <arg name="robot_namespace" value="robot_blue1"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 8. 蓝方机器人 2（robot_blue2） -->
+  <!-- ============================================== -->
+  <group ns="robot_blue2">
+    <param name="tf_prefix" value="robot_blue2"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="10.0"/>
+      <param name="tf_prefix" value="robot_blue2"/>
+    </node>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+      <param name="use_gui" value="false"/>
+      <param name="zero_initial_pose" value="true"/>
+    </node>
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+          args="-urdf -model robot_blue2 -x $(arg robot_blue2_x) -y $(arg robot_blue2_y) -z 0.0 -Y $(arg robot_blue2_a) -param /robot_blue2/robot_description"/>
+  </group>
+
+  <include file="$(find robot_vs)/launch/simulation/amcl.launch">
+    <arg name="robot_namespace" value="robot_blue2"/>
+    <arg name="initial_pose_x" value="$(arg robot_blue2_x)"/>
+    <arg name="initial_pose_y" value="$(arg robot_blue2_y)"/>
+    <arg name="initial_pose_a" value="$(arg robot_blue2_a)"/>
+  </include>
+
+  <include file="$(find robot_vs)/launch/simulation/move_base.launch">
+    <arg name="robot_namespace" value="robot_blue2"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 9. 蓝方机器人 3（robot_blue3） -->
+  <!-- ============================================== -->
+  <group ns="robot_blue3">
+    <param name="tf_prefix" value="robot_blue3"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find turtlebot3_description)/urdf/turtlebot3_$(arg model).urdf.xacro"/>
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="10.0"/>
+      <param name="tf_prefix" value="robot_blue3"/>
+    </node>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+      <param name="use_gui" value="false"/>
+      <param name="zero_initial_pose" value="true"/>
+    </node>
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" output="screen"
+          args="-urdf -model robot_blue3 -x $(arg robot_blue3_x) -y $(arg robot_blue3_y) -z 0.0 -Y $(arg robot_blue3_a) -param /robot_blue3/robot_description"/>
+  </group>
+
+  <include file="$(find robot_vs)/launch/simulation/amcl.launch">
+    <arg name="robot_namespace" value="robot_blue3"/>
+    <arg name="initial_pose_x" value="$(arg robot_blue3_x)"/>
+    <arg name="initial_pose_y" value="$(arg robot_blue3_y)"/>
+    <arg name="initial_pose_a" value="$(arg robot_blue3_a)"/>
+  </include>
+
+  <include file="$(find robot_vs)/launch/simulation/move_base.launch">
+    <arg name="robot_namespace" value="robot_blue3"/>
+  </include>
+
+  <!-- ============================================== -->
+  <!-- 10. RViz -->
+  <!-- ============================================== -->
+  <node name="rviz" pkg="rviz" type="rviz" output="screen"
+        args="-d $(find robot_vs)/rviz/multi_robot.rviz"/>
+
+</launch>

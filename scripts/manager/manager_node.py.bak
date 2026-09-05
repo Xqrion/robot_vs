@@ -207,13 +207,8 @@ class TeamManager(object):
         return fallback
 
     def _on_game_state(self, msg):
-        """比赛状态回调，防止从 PLAYING 回退到 IDLE"""
-        new_status = str(msg.status)
-        # 防止错误覆盖：如果当前是 PLAYING，不接受 IDLE
-        if self._game_status == "PLAYING" and new_status == "IDLE":
-            rospy.logwarn_throttle(1.0, "[%s] 忽略状态回退: %s -> %s", self.team_color, self._game_status, new_status)
-            return
-        self._game_status = new_status
+        """比赛状态回调"""
+        self._game_status = str(msg.status)
 
     def _send_stop_to_all(self, reason="match_ended"):
         """给所有小车发 STOP"""
@@ -293,52 +288,27 @@ class TeamManager(object):
 
     def run_cycle(self):
         """
-        单次决策循环（只对存活车辆分配任务）
+        单次决策循环
+        在比赛进行时（PLAYING）被定时调用
         """
         # 1. 观测全局状态
         state = self.observer.get_battle_state()
 
-        # 2. 从 state 中提取存活车辆列表
-        alive_cars = []
-        # 假设 state 中有 my_team.cars 或类似结构
-        # 如果没有，可以尝试遍历 self.my_cars 并从 state 中查找存活状态
-        if hasattr(state, 'my_team') and hasattr(state.my_team, 'cars'):
-            for car in state.my_team.cars:
-                if getattr(car, 'alive', True):
-                    alive_cars.append(getattr(car, 'id', ''))
-        else:
-            # 兼容旧结构：直接从 self.my_cars 过滤（但需要从 state 中获取存活信息）
-            # 这里简化为假设所有车都存活（不推荐）
-            # 更好的做法是使用 self.observer 中的最新数据
-            alive_cars = self.my_cars[:]
-
-        # 如果没有任何存活车辆，发送 STOP 并终止决策
-        if not alive_cars:
-            rospy.logwarn("[%s] 所有车辆已阵亡，停止决策", self.team_color)
-            for ns in self.my_cars:
-                self.dispatcher._send_stop(ns, "all_dead")
-            return {}
-
-        # 临时将 self.my_cars 替换为存活列表，以便后续组件使用
-        original_my_cars = self.my_cars
-        self.my_cars = alive_cars
-
-        # 3. 格式化规划输入（使用存活车辆列表）
+        # 2. 格式化规划输入
         prompt_input = self.formatter.build(state, self.team_color, self.my_cars)
 
-        # 4. 调用 LLMClient 进行博弈决策
+        # 3. 调用 LLMClient 进行博弈决策
+        #    - 如果 llm_enabled=True，调用大模型（低频）
+        #    - 如果 llm_enabled=False，使用规则博弈决策（高频）
         tasks = self.llm_client.plan_tasks(prompt_input)
 
-        # 5. 恢复原列表
-        self.my_cars = original_my_cars
-
-        # 6. 分发任务（只分发给存活车辆，tasks 中应该只包含存活车辆）
+        # 4. 分发任务
         self.dispatcher.dispatch(tasks)
 
-        # 7. 打印决策日志
+        # 5. 打印决策日志（调试用）
         self._log_decision(tasks)
 
-        # 8. 发布叙事事件
+        # 6. 发布叙事事件
         self._publish_narrative_events(tasks)
 
         self._decision_count += 1
@@ -394,7 +364,7 @@ class TeamManager(object):
         """主循环"""
         rate = rospy.Rate(self.loop_hz)
         while not rospy.is_shutdown():
-            rospy.loginfo_throttle(1.0, "Manager loop: game_status=%s", self._game_status)
+	    rospy.loginfo_throttle(1.0, "Manager loop: game_status=%s", self._game_status)
 
             if self._game_status == "FINISHED":
                 # 比赛结束：持续发 STOP
@@ -402,10 +372,10 @@ class TeamManager(object):
                 rate.sleep()
                 continue
 
-            # 比赛未开始：空转等待（取消注释）
-            if self._game_status == "IDLE":
-                rate.sleep()
-                continue
+            #if self._game_status == "IDLE":
+                # 比赛未开始：空转等待
+             #   rate.sleep()
+              #  continue
 
             # _game_status == "PLAYING": 正常规划
             try:

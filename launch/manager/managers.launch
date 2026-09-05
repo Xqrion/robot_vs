@@ -15,5 +15,5 @@
         output="screen"
         required="false">
     <rosparam command="load" file="$(find robot_vs)/config/manager/blue_manager.yaml" />
-  </node> 
+  </node>
 </launch>

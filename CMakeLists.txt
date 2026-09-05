@@ -59,6 +59,7 @@ add_message_files(
   RobotState.msg
   TaskCommand.msg
   TeamMacroState.msg
+  GameState.msg
   VisibleEnemies.msg
 )
 

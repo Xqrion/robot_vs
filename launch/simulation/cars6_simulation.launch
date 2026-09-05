@@ -1,0 +1,45 @@
+<launch>
+  <!--
+    6 台小车 agent 启动（3红+3蓝）
+    用于仿真环境，与 multi_robot6.launch 配合使用
+  -->
+
+  <!-- 红方 3 台 -->
+  <group ns="robot_red1">
+    <node pkg="robot_vs" type="car_node.py" name="car_agent" output="screen">
+      <rosparam command="load" file="$(find robot_vs)/config/car/red_car.yaml" />
+    </node>
+  </group>
+
+  <group ns="robot_red2">
+    <node pkg="robot_vs" type="car_node.py" name="car_agent" output="screen">
+      <rosparam command="load" file="$(find robot_vs)/config/car/red_car.yaml" />
+    </node>
+  </group>
+
+  <group ns="robot_red3">
+    <node pkg="robot_vs" type="car_node.py" name="car_agent" output="screen">
+      <rosparam command="load" file="$(find robot_vs)/config/car/red_car.yaml" />
+    </node>
+  </group>
+
+  <!-- 蓝方 3 台 -->
+  <group ns="robot_blue1">
+    <node pkg="robot_vs" type="car_node.py" name="car_agent" output="screen">
+      <rosparam command="load" file="$(find robot_vs)/config/car/blue_car.yaml" />
+    </node>
+  </group>
+
+  <group ns="robot_blue2">
+    <node pkg="robot_vs" type="car_node.py" name="car_agent" output="screen">
+      <rosparam command="load" file="$(find robot_vs)/config/car/blue_car.yaml" />
+    </node>
+  </group>
+
+  <group ns="robot_blue3">
+    <node pkg="robot_vs" type="car_node.py" name="car_agent" output="screen">
+      <rosparam command="load" file="$(find robot_vs)/config/car/blue_car.yaml" />
+    </node>
+  </group>
+
+</launch>

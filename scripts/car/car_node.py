@@ -5,6 +5,7 @@ import sys
 import os
 
 import rospy
+
 from robot_vs.msg import TaskCommand
 
 # 允许导入同级包（skill_manager、task_engine、skills/）
@@ -38,10 +39,10 @@ class CarAgent(object):
         self.task_engine = task_engine if task_engine is not None else TaskEngine(self.ns, self.skill_manager)
 
         self._task_sub = rospy.Subscriber(
-            "/{}/task_cmd".format(self.ns),
-            TaskCommand,
-            self._task_cmd_cb,
-            queue_size=10,
+             "/{}/car_task".format(self.ns),
+    	     TaskCommand,
+             self._task_cmd_cb,
+             queue_size=10,
         )
 
         rospy.loginfo(

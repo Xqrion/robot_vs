@@ -20,7 +20,7 @@ class LLMClient(BasePlanner):
     3. 战术选择（进攻/防守/平衡）
     4. 低血量撤退（HP < 20 → RETREAT）
     5. 阵亡车辆自动过滤（基于 HP <= 0 强制标记 alive=False）
-    6. 击杀后动态响应：人数优势时追击（若有可见敌人则直接攻击），人数劣势时攻守分离
+    6. 敌方不可见时：若有最后已知位置则追击，否则分散侦察（方案A）
     """
 
     def __init__(self, patrol_points=None, use_llm=False,
@@ -37,15 +37,20 @@ class LLMClient(BasePlanner):
         self._llm_timeout_s = float(llm_timeout_s)
 
         # 博弈状态
-        self.roles = {}
-        self.targets = {}
-        self.current_tactic = 'balanced'
-        self.focus_target = None
+        self.roles = {}          # {robot_id: 'Attack'/'Support-1'/'Support-2'}
+        self.targets = {}        # {robot_id: target_robot_id}
+        self.current_tactic = 'balanced'  # 'aggressive' / 'balanced' / 'defensive'
+        self.focus_target = None          # 集火目标
 
         # ---- 缓存敌方状态（最后已知位置） ----
         self._last_enemy_state = []
 
     def plan_tasks(self, battle_state):
+        """
+        主决策入口
+        输入：battle_state（来自 GlobalObserver）
+        输出：任务字典 {robot_id: {action, target, mode, reason, timeout}}
+        """
         if self._use_llm:
             try:
                 return self._llm_plan(battle_state)
@@ -54,21 +59,39 @@ class LLMClient(BasePlanner):
 
         return self._rule_plan(battle_state)
 
+    # ================================================================
+    # 方案 A：规则博弈决策（核心）
+    # ================================================================
+
     def _rule_plan(self, battle_state):
+        """
+        规则版博弈决策
+        流程：
+        1. 提取状态（含 alive 过滤，HP <= 0 视为阵亡）
+        2. 威胁评估
+        3. 角色分配（仅存活车辆）
+        4. 目标选择（集火 + 压制）
+        5. 生成任务（含 RETREAT）
+        """
+        # 1. 提取状态
         team_state, enemy_state, robot_ids = self._extract_state(battle_state)
 
+        # ---- 缓存敌方状态（只有当前可见时才更新） ----
         if enemy_state:
             self._last_enemy_state = enemy_state
+        # 如果当前不可见，保留之前的位置（不覆盖）
 
         if not robot_ids:
             rospy.logwarn("No robot_ids, returning empty")
             return {}
 
+        # 过滤掉阵亡车辆（仅保留 alive=True 的车辆）
         team_state = [car for car in team_state if car.get('alive', True)]
         if not team_state:
             rospy.logwarn("All friendly cars are dead, returning empty")
             return {}
 
+        # 更新 robot_ids
         robot_ids = [car['id'] for car in team_state]
 
         rospy.loginfo("=== _rule_plan called ===")
@@ -77,28 +100,36 @@ class LLMClient(BasePlanner):
         rospy.loginfo("enemy_state: %s", enemy_state)
         rospy.loginfo("last_enemy_state: %s", self._last_enemy_state)
 
-        # 计算存活数量（用于战术分支）
-        alive_count = len(team_state)
-        enemy_alive_count = len([e for e in enemy_state if e.get('visible', True)])
-
-        rospy.loginfo("alive_count=%d, enemy_alive_count=%d", alive_count, enemy_alive_count)
-
+        # 2. 威胁评估（找威胁最大的敌人）
         threats = self._assess_threats(team_state, enemy_state)
         primary_threat = threats[0] if threats else None
+
+        # 3. 找残血敌人（用于压制）
         low_hp_enemy = self._find_lowest_hp(enemy_state)
 
+        # 4. 角色分配
         self.roles = self._assign_roles(team_state, enemy_state)
+
+        # 5. 目标选择
         self.targets = self._select_targets(
             team_state, enemy_state, self.roles, primary_threat, low_hp_enemy
         )
+
+        # 6. 战术选择
         self.current_tactic = self._select_tactic(team_state, enemy_state)
 
-        tasks = self._generate_tasks(team_state, enemy_state, alive_count, enemy_alive_count)
+        # 7. 生成任务（含 RETREAT）
+        tasks = self._generate_tasks(team_state, enemy_state)
 
         rospy.loginfo("Final tasks: %s", tasks)
         return tasks
 
+    # ================================================================
+    # 2.1 状态提取（关键修复：HP <= 0 强制标记 alive=False）
+    # ================================================================
+
     def _extract_state(self, battle_state):
+        """从 battle_state 提取 team_state, enemy_state, robot_ids（含 alive）"""
         friendly = battle_state.get('friendly', {})
         enemy = battle_state.get('enemy', {})
 
@@ -109,6 +140,7 @@ class LLMClient(BasePlanner):
             state = data.get('state', {})
             if isinstance(state, dict):
                 hp = state.get('hp', 100.0)
+                # ---- 关键修复：HP <= 0 时强制标记为阵亡 ----
                 alive = state.get('alive', True)
                 if hp <= 0:
                     alive = False
@@ -120,7 +152,7 @@ class LLMClient(BasePlanner):
                     'yaw': state.get('yaw', 0.0),
                     'hp': hp,
                     'ammo': state.get('ammo', 50.0),
-                    'alive': alive,
+                    'alive': alive,   # 使用修正后的 alive
                     'in_combat': state.get('in_combat', False)
                 })
                 robot_ids.append(ns)
@@ -143,7 +175,15 @@ class LLMClient(BasePlanner):
 
         return team_state, enemy_state, robot_ids
 
+    # ================================================================
+    # 2.2 威胁评估
+    # ================================================================
+
     def _assess_threats(self, team_state, enemy_state):
+        """
+        威胁评估：距离（0.8）+ 我方掉血（0.2）
+        返回按威胁分数排序的敌人列表
+        """
         if not enemy_state or not team_state:
             return []
 
@@ -153,12 +193,17 @@ class LLMClient(BasePlanner):
                 continue
 
             score = 0.0
-            min_dist = min([self._distance(team, enemy) for team in team_state])
+
+            # 1. 距离因子（0.8）
+            min_dist = min([
+                self._distance(team, enemy) for team in team_state
+            ])
             if min_dist < 5.0:
                 score += (5.0 - min_dist) / 5.0 * 80
             elif min_dist < 10.0:
                 score += (10.0 - min_dist) / 10.0 * 40
 
+            # 2. 我方掉血因子（0.2）
             avg_hp = sum(t['hp'] for t in team_state) / len(team_state)
             if avg_hp < 80:
                 score += 20
@@ -169,23 +214,41 @@ class LLMClient(BasePlanner):
         scored_enemies.sort(key=lambda e: e.get('threat_score', 0), reverse=True)
         return scored_enemies
 
+    # ================================================================
+    # 2.3 角色分配（仅存活车辆）
+    # ================================================================
+
     def _assign_roles(self, team_state, enemy_state):
+        """
+        角色分配：距离（0.8）+ 角度（0.1）+ 血量（0.1）
+        第1名 → Attack（主攻）
+        第2名 → Support-1（主助攻）
+        第3名 → Support-2（副助攻）
+        """
+        # 仅对存活车辆分配
         alive_cars = [t for t in team_state if t.get('alive', True)]
         if len(alive_cars) < 3:
             return {t['id']: 'Attack' for t in alive_cars}
 
         scores = {}
         for car in alive_cars:
+            # 距离得分（0-100）
             if enemy_state:
                 min_dist = min([self._distance(car, e) for e in enemy_state])
                 dist_score = max(0, (10 - min_dist) / 10 * 100)
             else:
                 dist_score = 50
 
+            # 角度得分（0-100）
             angle_score = self._calc_angle_score(car, enemy_state)
+
+            # 血量得分（0-100）
             hp_score = car.get('hp', 0) / 100 * 100
+
+            # 综合
             scores[car['id']] = dist_score * 0.8 + angle_score * 0.1 + hp_score * 0.1
 
+        # 排序
         sorted_cars = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
         roles = {
@@ -196,6 +259,7 @@ class LLMClient(BasePlanner):
         return roles
 
     def _calc_angle_score(self, car, enemies):
+        """计算角度得分（正面面对敌人得分高）"""
         if not enemies:
             return 50
 
@@ -214,7 +278,16 @@ class LLMClient(BasePlanner):
 
         return (math.pi - diff) / math.pi * 100
 
+    # ================================================================
+    # 2.4 目标选择
+    # ================================================================
+
     def _select_targets(self, team_state, enemy_state, roles, primary_threat, low_hp_enemy):
+        """
+        目标选择策略：
+        - Attack + Support-1 → 集火威胁最大的敌人
+        - Support-2 → 压制残血/其他目标，然后汇合集火
+        """
         targets = {}
 
         if not enemy_state:
@@ -228,7 +301,7 @@ class LLMClient(BasePlanner):
                 targets[car_id] = primary_threat['id'] if primary_threat else None
             elif role == 'Support-1':
                 targets[car_id] = primary_threat['id'] if primary_threat else None
-            else:
+            else:  # Support-2
                 if low_hp_enemy and low_hp_enemy['id'] != (primary_threat['id'] if primary_threat else None):
                     targets[car_id] = low_hp_enemy['id']
                 elif primary_threat:
@@ -240,6 +313,7 @@ class LLMClient(BasePlanner):
         return targets
 
     def _find_lowest_hp(self, enemy_state):
+        """找血量最低的敌人"""
         if not enemy_state:
             return None
         alive_enemies = [e for e in enemy_state if e.get('visible', True)]
@@ -247,7 +321,12 @@ class LLMClient(BasePlanner):
             return None
         return min(alive_enemies, key=lambda e: e.get('hp', 100))
 
+    # ================================================================
+    # 2.5 战术选择
+    # ================================================================
+
     def _select_tactic(self, team_state, enemy_state):
+        """战术选择：进攻 / 防守 / 平衡"""
         team_hp = sum(t.get('hp', 0) for t in team_state)
         enemy_hp = sum(e.get('hp', 0) for e in enemy_state if e.get('visible', True))
 
@@ -263,50 +342,34 @@ class LLMClient(BasePlanner):
             return 'balanced'
 
     # ================================================================
-    # 核心修改：_generate_tasks 和 _get_formation_positions
+    # 2.6 生成任务（含 RETREAT）
     # ================================================================
 
-    def _generate_tasks(self, team_state, enemy_state, alive_count, enemy_alive_count):
-        """生成任务字典（含击杀后动态响应）"""
+    def _generate_tasks(self, team_state, enemy_state):
+        """生成任务字典（含低血量撤退逻辑）"""
         tasks = {}
-
-        # ---- 根据人数对比决定战术模式 ----
-        if alive_count > enemy_alive_count:
-            tactic_mode = "pursuit"      # 人数优势：追击
-            rospy.loginfo("[Tactic] 人数优势 (%d vs %d) → 追击模式", alive_count, enemy_alive_count)
-        elif alive_count < enemy_alive_count:
-            tactic_mode = "attack_and_retreat"  # 人数劣势：一攻一守
-            rospy.loginfo("[Tactic] 人数劣势 (%d vs %d) → 攻守模式", alive_count, enemy_alive_count)
-        else:
-            tactic_mode = "balanced"
-            rospy.loginfo("[Tactic] 人数持平 (%d vs %d) → 平衡模式", alive_count, enemy_alive_count)
-
-        # 计算队形/追击位置（在追击模式下，formation_positions 是最后已知位置）
         formation_positions = self._get_formation_positions(
-            team_state, enemy_state, tactic_mode
+            team_state, self.current_tactic, enemy_state   # 传入 enemy_state
         )
-
-        # 获取角色列表（用于攻守模式分配）
-        role_list = list(self.roles.items())
-        attack_cars = [cid for cid, role in role_list if role == 'Attack']
-        support_cars = [cid for cid, role in role_list if role in ('Support-1', 'Support-2')]
 
         for car in team_state:
             car_id = car['id']
             role = self.roles.get(car_id, 'Support-2')
             target_id = self.targets.get(car_id)
 
+            # ---- 低血量撤退（HP < 20） ----
             hp = car.get('hp', 100)
-
-            # ---- 1. 低血量撤退（最高优先级） ----
             if hp < 20:
+                # 计算撤退方向（远离最近的敌人）
                 if enemy_state:
                     nearest_enemy = min(enemy_state, key=lambda e: self._distance(car, e))
                     retreat_x = car['x'] - (nearest_enemy['x'] - car['x']) * 2.0
                     retreat_y = car['y'] - (nearest_enemy['y'] - car['y']) * 2.0
+                    # 限制在地图范围内（假设地图范围 -15 ~ 15）
                     retreat_x = max(-15, min(15, retreat_x))
                     retreat_y = max(-15, min(15, retreat_y))
                 else:
+                    # 如果没有敌人，则撤退到地图中心附近（安全区）
                     retreat_x, retreat_y = 0.0, 0.0
 
                 tasks[car_id] = self._build_task(
@@ -318,76 +381,7 @@ class LLMClient(BasePlanner):
                 )
                 continue
 
-            # ---- 2. 攻守模式（人数劣势）特殊处理 ----
-            if tactic_mode == "attack_and_retreat":
-                if car_id in attack_cars:
-                    # Attack 车 → 向前攻击（使用原本的目标或追击位置）
-                    if target_id:
-                        target = self._find_enemy_by_id(enemy_state, target_id)
-                        if target:
-                            tasks[car_id] = self._build_task(
-                                action='ATTACK',
-                                target={'x': target['x'], 'y': target['y']},
-                                mode=2,
-                                reason='{} attack forward (劣势反击)'.format(role),
-                                timeout=4.0
-                            )
-                            continue
-                    elif enemy_state:
-                        # 如果没有指定目标，攻击最近的敌人
-                        nearest = min(enemy_state, key=lambda e: self._distance(car, e))
-                        tasks[car_id] = self._build_task(
-                            action='ATTACK',
-                            target={'x': nearest['x'], 'y': nearest['y']},
-                            mode=2,
-                            reason='{} attack nearest (劣势反击)'.format(role),
-                            timeout=4.0
-                        )
-                        continue
-
-                elif car_id in support_cars:
-                    # Support 车 → 撤退掩护
-                    if enemy_state:
-                        nearest_enemy = min(enemy_state, key=lambda e: self._distance(car, e))
-                        retreat_x = car['x'] - (nearest_enemy['x'] - car['x']) * 2.0
-                        retreat_y = car['y'] - (nearest_enemy['y'] - car['y']) * 2.0
-                    else:
-                        retreat_x, retreat_y = 0.0, 0.0
-                    tasks[car_id] = self._build_task(
-                        action='RETREAT',
-                        target={'x': retreat_x, 'y': retreat_y},
-                        mode=0,
-                        reason='{} retreat (掩护)'.format(role),
-                        timeout=6.0
-                    )
-                    continue
-
-            # ---- 3. 追击模式（人数优势） ----
-            if tactic_mode == "pursuit":
-                # ---- 关键修改：如果有可见敌人，直接攻击 ----
-                if enemy_state:
-                    # 攻击最近的敌人
-                    nearest = min(enemy_state, key=lambda e: self._distance(car, e))
-                    tasks[car_id] = self._build_task(
-                        action='ATTACK',
-                        target={'x': nearest['x'], 'y': nearest['y']},
-                        mode=2,
-                        reason='pursuit attack (人数优势)',
-                        timeout=3.0
-                    )
-                else:
-                    # 没有可见敌人 → 前往最后已知位置（formation_positions 已计算）
-                    pos = formation_positions.get(car_id, {'x': car['x'], 'y': car['y']})
-                    tasks[car_id] = self._build_task(
-                        action='GOTO',
-                        target=pos,
-                        mode=1,
-                        reason='pursuit (追击位置)',
-                        timeout=8.0
-                    )
-                continue
-
-            # ---- 4. 正常模式（有目标 → 攻击，无目标 → 队形移动） ----
+            # ---- 如果有目标 ----
             if target_id:
                 target = self._find_enemy_by_id(enemy_state, target_id)
                 if target:
@@ -400,6 +394,7 @@ class LLMClient(BasePlanner):
                     )
                     continue
 
+            # ---- 没有目标 → 按队形/侦察/追击移动 ----
             pos = formation_positions.get(car_id, {'x': car['x'], 'y': car['y']})
             tasks[car_id] = self._build_task(
                 action='GOTO',
@@ -411,43 +406,26 @@ class LLMClient(BasePlanner):
 
         return tasks
 
-    def _get_formation_positions(self, team_state, enemy_state, tactic_mode):
+    # ================================================================
+    # 2.7 队形位置计算（含侦查、追击模式）
+    # ================================================================
+
+    def _get_formation_positions(self, team_state, tactic, enemy_state):
         """
-        计算队形/追击位置
-        - pursuit: 朝敌人方向推进（若无可见敌人则使用最后已知位置）
-        - attack_and_retreat: 由 _generate_tasks 特殊处理，这里返回空
-        - balanced: 可见敌人用三角队形，不可见则追击/侦察
+        计算队形位置：
+        - 敌方可见时：三角队形（集中）
+        - 敌方不可见但有最后已知位置：追击（所有车集中前往最后已知平均位置）
+        - 敌方不可见且无历史位置：分散侦察（三个侦察点）
         """
         if not team_state:
             return {}
 
-        # ---- 追击模式：向前推进（朝敌人方向） ----
-        if tactic_mode == "pursuit":
-            # 用最后已知敌人位置作为目标
-            target_x, target_y = 0.0, 0.0
-            if self._last_enemy_state:
-                target_x = sum(e.get('x', 0.0) for e in self._last_enemy_state) / len(self._last_enemy_state)
-                target_y = sum(e.get('y', 0.0) for e in self._last_enemy_state) / len(self._last_enemy_state)
-                rospy.loginfo("[Pursuit] 追击目标: (%.1f, %.1f)", target_x, target_y)
-            else:
-                rospy.loginfo("[Pursuit] 无历史位置，朝地图中心推进")
-
-            positions = {}
-            car_ids = sorted([t['id'] for t in team_state])
-            for car_id in car_ids:
-                positions[car_id] = {'x': target_x, 'y': target_y}
-            return positions
-
-        # ---- 攻守模式：由 _generate_tasks 特殊处理，这里不返回位置 ----
-        if tactic_mode == "attack_and_retreat":
-            return {}
-
-        # ---- 平衡模式：原有逻辑 ----
+        # ---- 如果当前有可见敌人 → 三角队形 ----
         if enemy_state:
             center_x = sum(t['x'] for t in team_state) / len(team_state)
             center_y = sum(t['y'] for t in team_state) / len(team_state)
 
-            offset_scale = 1.5 if self.current_tactic == 'aggressive' else (-0.8 if self.current_tactic == 'defensive' else 0.0)
+            offset_scale = 1.5 if tactic == 'aggressive' else (-0.8 if tactic == 'defensive' else 0.0)
 
             positions = {}
             car_ids = sorted([t['id'] for t in team_state])
@@ -459,16 +437,22 @@ class LLMClient(BasePlanner):
                 }
             return positions
 
-        # 没有可见敌人 → 追击/侦察
+        # ---- 当前无可见敌人 ----
+        # 如果有最后已知的敌人位置 → 追击
         if self._last_enemy_state:
             return self._get_pursuit_positions(team_state)
+
+        # ---- 否则（完全无信息）→ 分散侦察 ----
         return self._get_scout_positions(team_state)
 
     def _get_pursuit_positions(self, team_state):
-        """追击模式：所有存活小车前往最后已知的敌人平均位置"""
+        """
+        追击模式：所有存活小车前往最后已知的敌人平均位置
+        """
         if not team_state or not self._last_enemy_state:
             return {}
 
+        # 计算最后已知敌人的平均位置
         avg_x = sum(e.get('x', 0.0) for e in self._last_enemy_state) / len(self._last_enemy_state)
         avg_y = sum(e.get('y', 0.0) for e in self._last_enemy_state) / len(self._last_enemy_state)
 
@@ -481,22 +465,39 @@ class LLMClient(BasePlanner):
 
         return positions
 
+    def _has_visible_enemy(self):
+        """检查当前是否有可见敌人（基于缓存的 enemy_state）"""
+        # 此方法已不再被 _get_formation_positions 直接使用，但保留以防其他调用
+        if not hasattr(self, '_last_enemy_state'):
+            return False
+        return len(self._last_enemy_state) > 0
+
     def _get_scout_positions(self, team_state):
-        """分散侦察点"""
+        """
+        分散侦查点（根据地图大小调整坐标）
+        第1辆车去地图右上，第2辆去地图左上，第3辆去地图下方中间
+        """
         scout_points = [
-            {'x': 6.0, 'y': 6.0},
-            {'x': -6.0, 'y': 6.0},
-            {'x': 0.0, 'y': -6.0},
+            {'x': 6.0, 'y': 6.0},   # 右上
+            {'x': -6.0, 'y': 6.0},  # 左上
+            {'x': 0.0, 'y': -6.0},  # 下方中间
         ]
 
         positions = {}
         car_ids = sorted([t['id'] for t in team_state])
         for i, car_id in enumerate(car_ids):
             point = scout_points[i % len(scout_points)]
-            positions[car_id] = {'x': point['x'], 'y': point['y']}
+            positions[car_id] = {
+                'x': point['x'],
+                'y': point['y']
+            }
             rospy.loginfo("[Scout] %s → (%.1f, %.1f)", car_id, point['x'], point['y'])
 
         return positions
+
+    # ================================================================
+    # 2.8 辅助函数
+    # ================================================================
 
     def _distance(self, a, b):
         dx = a.get('x', 0) - b.get('x', 0)
@@ -522,7 +523,12 @@ class LLMClient(BasePlanner):
             'timeout': float(timeout)
         }
 
+    # ================================================================
+    # 方案 B：LLM 调用（可选用）
+    # ================================================================
+
     def _llm_plan(self, battle_state):
+        """调用 LLM 服务进行决策（与现有逻辑兼容）"""
         friendly = battle_state.get('friendly', {})
         robot_ids = [ns for ns in friendly.keys()]
 
@@ -543,6 +549,7 @@ class LLMClient(BasePlanner):
         return self._rule_plan(battle_state)
 
     def _normalize_llm_tasks(self, tasks, robot_ids):
+        """标准化 LLM 输出"""
         result = {}
         for rid in robot_ids:
             raw = tasks.get(rid)

@@ -10,7 +10,8 @@
     <xacro:property name="ns" value="$(arg ns)"/>
     <link name="${ns}/base_footprint"/>
 
-    <xacro:macro name="common_link" params="name material path *origin">
+    <!-- ★ 宏定义：明确声明需要 origin 和 inertial 两个块 -->
+    <xacro:macro name="common_link" params="name material path *origin *inertial">
         <link name="${ns}/${name}">
             <visual>
                 <geometry>
@@ -26,6 +27,7 @@
                 <origin xyz="0 0 0" rpy="0 0 0"/>
             </collision>
             <xacro:insert_block name="origin"/>
+            <xacro:insert_block name="inertial"/>
         </link>
     </xacro:macro>
 
@@ -47,7 +49,9 @@
         </joint>
     </xacro:macro>
 
+    <!-- base_link 调用：提供了 origin 和 inertial 两个块 -->
     <common_link name="base_link" material="Green" path="mecanum">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
         <inertial>
             <origin xyz="0.00498197982182523 5.70233829969297E-05 -0.0121008098068578" rpy="0 0 0"/>
             <mass value="0.486218814966626"/>
@@ -62,16 +66,14 @@
     </common_link>
     <fixed_joint name="base_joint" parent="base_footprint" child="base_link" xyz="0.0 0.0 0.0815" rpy="0 0 0"/>
 
-    <!-- ======================================== -->
-    <!-- 新增：激光雷达laser_link和固定关节 -->
-    <!-- ======================================== -->
-    <!-- 3. 激光雷达link（用common_link宏，material和path根据你的实际情况改，没有STL的话可以留空或简化） -->
+    <!-- 激光雷达 link ★ 修改点：补上 inertial 块（即使是默认值） -->
     <common_link name="laser_link" material="White" path="mecanum">
-        <!-- 如果没有激光雷达的STL文件，可以把visual和collision标签简化成简单的几何体，比如圆柱 -->
-        <!-- 这里先保留你的common_link结构，没有STL的话RViz里不会显示激光雷达模型，但不影响TF和导航 -->
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertial>
+            <mass value="0.01"/>
+            <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+        </inertial>
     </common_link>
 
-    <!-- 4. 固定关节：连接base_link和laser_link -->
-    <!-- 参数和你launch里的static_transform_publisher完全一致：x=0.1, y=0.0, z=0.05, rpy=3.14159265 0.0 0.0 -->
     <fixed_joint name="base_laser_joint" parent="base_link" child="laser_link" xyz="0.1 0.0 0.05" rpy="3.14159265 0.0 0.0"/>
 </robot>

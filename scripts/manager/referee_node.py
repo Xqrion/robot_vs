@@ -5,6 +5,7 @@ import math
 import threading
 
 import rospy
+from std_msgs.msg import String
 from robot_vs.msg import BattleMacroState
 from robot_vs.msg import EnemyInfo
 from robot_vs.msg import FireEvent
@@ -12,6 +13,7 @@ from robot_vs.msg import RobotState
 from robot_vs.msg import TeamMacroState
 from robot_vs.msg import VisibleEnemies
 from nav_msgs.msg import OccupancyGrid
+from robot_vs.msg import GameState
 
 
 class RefereeNode(object):
@@ -33,7 +35,7 @@ class RefereeNode(object):
         self.fire_range = float(rospy.get_param("~fire_range", 5.0))
         self.hit_width = float(rospy.get_param("~hit_width", 0.5))
         self.fire_damage = int(rospy.get_param("~fire_damage", 20))
-        self.vision_range = float(rospy.get_param("~vision_range", 4.0))
+        self.vision_range = float(rospy.get_param("~vision_range", 6.0))
 
         self.fov_deg = float(rospy.get_param("~fov_deg", 120.0))
         self.fov_rad = math.radians(self.fov_deg)
@@ -63,6 +65,10 @@ class RefereeNode(object):
         self.macro_state_pub = rospy.Publisher(
             "/referee/macro_state", BattleMacroState, queue_size=10
         )
+        # 游戏状态管理
+        self._game_status = "IDLE"
+        self.game_state_pub = rospy.Publisher('/game/state', GameState, queue_size=10)
+        rospy.Subscriber('/game/command', String, self._game_command_callback)
 
         rospy.loginfo(
             "RefereeNode initialized: loop_hz=%.1f discover_hz=%.1f fire_range=%.2f hit_width=%.2f fire_damage=%d vision_range=%.2f",
@@ -214,6 +220,9 @@ class RefereeNode(object):
             record["y"] = float(msg.pose.position.y)
             record["yaw"] = float(self._quaternion_to_yaw(msg.pose.orientation))
 
+            # ===== 强制根据命名空间设置队伍（覆盖 msg.team 可能出现的错误） =====
+            record["team"] = self._detect_team(ns)
+
     def _ray_hit(self, shooter_x, shooter_y, shooter_yaw, target_x, target_y):
         dx = float(target_x) - float(shooter_x)
         dy = float(target_y) - float(shooter_y)
@@ -231,6 +240,7 @@ class RefereeNode(object):
         # 2D 叉积模长=到射线垂距（方向向量已单位化）
         perp = abs(dx * dir_y - dy * dir_x)
         return perp < self.hit_width
+
     def _world_to_map(self, x, y):
         """世界坐标 -> 栅格坐标 (mx,my)，失败返回 None"""
         if self._map_info is None:
@@ -361,7 +371,7 @@ class RefereeNode(object):
 
     def _angle_diff(self, a, b):
         return math.atan2(math.sin(a - b), math.cos(a - b))
-    
+
     def _build_visible_enemies(self, observer_team):
         enemy_team = "blue" if observer_team == "red" else "red"
 
@@ -389,14 +399,14 @@ class RefereeNode(object):
 
                 dist = math.hypot(ex - fx, ey - fy)
                 if dist > self.vision_range:
-                 continue
+                    continue
 
                 bearing = math.atan2(ey - fy, ex - fx)
                 if abs(self._angle_diff(bearing, fyaw)) > half_fov:
-                 continue
+                    continue
 
                 if not self._has_line_of_sight(fx, fy, ex, ey):
-                 continue
+                    continue
                 seen = True
                 break
 
@@ -481,12 +491,33 @@ class RefereeNode(object):
 
             self._publish_visible_enemies()
             self._publish_macro_state()
+
+            # ---- 发布游戏状态 ----
+            state_msg = GameState()
+            state_msg.status = self._game_status
+            state_msg.elapsed = 0.0
+            state_msg.time_limit = 0.0
+            state_msg.winner = ""
+            state_msg.reason = ""
+            self.game_state_pub.publish(state_msg)
+
             main_rate.sleep()
 
     def _on_map(self, msg):
         with self._lock:
             self._map_info = msg.info
             self._map_data = msg.data  # tuple/list of int8
+
+    def _game_command_callback(self, msg):
+        """接收手动启动指令"""
+        cmd = msg.data.strip().lower()
+        if cmd == 'start':
+            self._game_status = "PLAYING"
+            rospy.loginfo("Referee: Received start command, game_status set to PLAYING")
+        elif cmd == 'stop':
+            self._game_status = "IDLE"
+            rospy.loginfo("Referee: Received stop command, game_status set to IDLE")
+    # 可以添加其他命令，如 pause/reset 等
 
 def main():
     rospy.init_node("referee_node", anonymous=False)

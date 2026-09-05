@@ -1,13 +1,16 @@
 team_color: "red"
-my_cars: ["robot_red", "robot_red2"]
-# my_cars: ["robot_red"] #"robot_red2"
-loop_hz: 0.2
-state_timeout_s: 8.0
-default_patrol_points:
-  - [1.0, 1.0]
-  - [0.5, 0.0]
-  - [0.0, 1.2]
+# ★ 关键修正：改为 3V3 仿真中的三台红车命名空间
+my_cars: ["robot_red1", "robot_red2", "robot_red3"]
+# ★ 关键修正：决策频率从 0.2Hz（每5秒一次）改为 20Hz（每秒20次），让小车反应更快
+loop_hz: 20.0
+# ★ 关键修正：降低状态超时，避免等待过久
+state_timeout_s: 2.0
+# ★ 关键修正：暂时关闭 LLM，避免连接出错影响启动
+llm_enabled: false
+# 清空巡逻点，因为 Manager 会通过博弈决策分配任务
+default_patrol_points: []
+# 如果未来想启用 LLM，再按需配置
 llm:
-  enabled: true
-  service_url: "http://127.0.0.1:8001/plan"
-  timeout_s: 30
+   enabled: false
+   service_url: "http://127.0.0.1:8001/plan"
+   timeout_s: 30

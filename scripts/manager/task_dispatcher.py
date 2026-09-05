@@ -36,7 +36,7 @@ class TaskDispatcher(object):
 		if ns in self._publishers:
 			return self._publishers[ns]
 
-		topic = "/{}/task_cmd".format(ns)
+		topic = "/{}/car_task".format(ns)
 		self._publishers[ns] = rospy.Publisher(topic, TaskCommand, queue_size=10)
 		rospy.loginfo("TaskDispatcher publisher created: %s", topic)
 		return self._publishers[ns]

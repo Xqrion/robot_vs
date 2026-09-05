@@ -307,6 +307,7 @@ class SkillManager(object):
         from skills.stop_skill import StopSkill
         from skills.attack_skill import AttackSkill
         from skills.rotate_skill import RotateSkill
+        from skills.retreat_skill import RetreatSkill   # 新增
 
         action = str(action_type).upper()
         if action == "GOTO":
@@ -317,6 +318,8 @@ class SkillManager(object):
             return AttackSkill(self)
         elif action == "ROTATE":
             return RotateSkill(self)
+        elif action == "RETREAT":           # 新增
+            return RetreatSkill(self)       # 新增
         else:
             rospy.logwarn(
                 "[%s] SkillManager: unknown action_type '%s', defaulting to StopSkill",
